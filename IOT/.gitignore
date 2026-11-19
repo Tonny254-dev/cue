@@ -1,0 +1,11 @@
+﻿# Secrets & local runtime
+backend/.env
+backend/*.sqlite3
+backend/**/__pycache__/
+backend/**/*.pyc
+firmware/.pio/
+firmware/.vscode/
+*.pyc
+__pycache__/
+.venv/
+venv/

@@ -1,0 +1,98 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CUE IoT Demo</title>
+  <link rel="stylesheet" href="{% static 'demo.css' %}?v=7">
+</head>
+<body>
+  <main class="wrap">
+    <header>
+      <p class="eyebrow">CUE IoT kit</p>
+      <h1>Live readings</h1>
+      <p class="sub">S1 in / S2 out · mL when small · idle when dry · Restart clears + opens valve</p>
+    </header>
+
+    <section class="status" data-panel>
+      <div class="pill" data-status>{{ state.status }}</div>
+      <div class="meta">
+        Valve <strong data-valve>{% if state.valve_open %}OPEN{% else %}CLOSED{% endif %}</strong>
+        · Serial <strong data-serial>{% if state.serial_connected %}ONLINE{% else %}OFFLINE{% endif %}</strong>
+        · AI <strong data-ai-mode>{{ state.ai_mode|default:"—" }}</strong>
+      </div>
+    </section>
+
+    <section class="cards">
+      <article>
+        <span>Inlet S1 (amount)</span>
+        <strong><em data-inlet-text>0 mL/min</em></strong>
+      </article>
+      <article>
+        <span>Outlet S2 (amount)</span>
+        <strong><em data-outlet-text>0 mL/min</em></strong>
+      </article>
+      <article>
+        <span>Loss Δ</span>
+        <strong><em data-loss-text>0 mL/min</em></strong>
+      </article>
+      <article>
+        <span>Pressure drop proxy</span>
+        <strong><em data-pressure>—</em></strong>
+      </article>
+      <article>
+        <span>Volume in</span>
+        <strong><em data-vin-text>0 mL</em></strong>
+      </article>
+      <article>
+        <span>Volume out</span>
+        <strong><em data-vout-text>0 mL</em></strong>
+      </article>
+    </section>
+
+    <section class="estimate" data-estimate-panel>
+      <h2>Volume note</h2>
+      <p>Totals count <strong>sensor pulses → mL</strong> only (not L/min×time). Small pours show in mL.</p>
+    </section>
+
+    <section class="estimate" data-history-panel>
+      <h2>History means (~10 s windows)</h2>
+      <pre data-history>—</pre>
+    </section>
+
+    <section class="estimate" data-estimate-panel>
+      <h2>Leak locus (only when real loss)</h2>
+      <p data-estimate>Idle until water flows. Noise below 0.40 L/min is ignored.</p>
+      <div class="estimate-meta">
+        <span>~<em data-est-s1>—</em> m from S1</span>
+        <span>~<em data-est-s2>—</em> m from S2</span>
+        <span>Severity <em data-est-sev>—</em>%</span>
+        <span>Confidence <em data-est-conf>—</em></span>
+        <span>Learned <em data-learn>0</em></span>
+      </div>
+    </section>
+
+    <section class="actions">
+      <button type="button" data-cmd="RESET">Restart (clear + open valve)</button>
+      <button type="button" class="danger" data-cmd="CLOSE">Close valve</button>
+      <button type="button" class="ghost" data-cmd="STATUS">Ask STATUS</button>
+      <p class="flash" data-cmd-flash></p>
+      <p class="hint">AI keeps learning on its own — pattern is never admin-reset.</p>
+    </section>
+
+    <section class="log">
+      <h2>Last serial</h2>
+      <pre data-line>{{ state.last_serial_line|default:"—" }}</pre>
+      <h2>API</h2>
+      <pre class="api">GET  /api/status/
+GET  /api/readings/?limit=100
+GET  /api/events/
+GET  /api/history/?limit=50
+POST /api/command/   {"command":"RESET"|"CLOSE"|"STATUS"}
+POST /iot/readings/  hardware ingest</pre>
+    </section>
+  </main>
+  <script src="{% static 'demo.js' %}?v=7"></script>
+</body>
+</html>
