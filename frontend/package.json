@@ -1,0 +1,12 @@
+{
+  "name": "aquapulse-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AquaPulse – Smart Water Monitoring, Leakage Detection and Automated Water Control System (Frontend Only)",
+  "scripts": {
+    "start": "npx serve . -l 5500",
+    "dev": "npx serve . -l 5500"
+  },
+  "keywords": ["aquapulse", "iot", "water-monitoring", "frontend"],
+  "license": "MIT"
+}

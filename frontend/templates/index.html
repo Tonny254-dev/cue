@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="AquaPulse – Smart Water Monitoring, Leakage Detection and Automated Water Control System">
+  <title>AquaPulse – Smart Water Monitoring System</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  <link rel="stylesheet" href="../css/aquapulse.css">
+</head>
+<body>
+
+  <!-- ===================== HERO ===================== -->
+  <header class="hero">
+    <nav class="landing-nav">
+      <div class="container d-flex align-items-center justify-content-between">
+        <a href="index.html" class="landing-brand">
+          <i class="bi bi-droplet-fill"></i> AquaPulse
+        </a>
+        <div class="d-none d-lg-flex align-items-center gap-4">
+          <a href="#features" class="landing-link">Features</a>
+          <a href="#how-it-works" class="landing-link">How It Works</a>
+          <a href="#about" class="landing-link">About</a>
+          <a href="login.html" class="landing-btn-outline">Sign In</a>
+        </div>
+      </div>
+    </nav>
+
+    <div class="container py-5 mt-5">
+      <div class="row align-items-center g-5">
+        <div class="col-lg-7">
+          <span class="hero-eyebrow"><i class="bi bi-cpu"></i> IoT-Powered Water Management</span>
+          <h1 class="hero-title">
+            Smart Water Monitoring,<br>
+            <span class="accent">Leak Detection</span> &amp; Control
+          </h1>
+          <p class="hero-subtitle">
+            AquaPulse helps you monitor water flow in real time, detect leaks
+            automatically, track consumption, and control your water valve —
+            all from one intelligent dashboard.
+          </p>
+          <div class="d-flex flex-wrap gap-3">
+            <a href="login.html" class="btn btn-ap-primary btn-lg">
+              <i class="bi bi-box-arrow-in-right me-2"></i>Launch Dashboard
+            </a>
+            <a href="#features" class="landing-btn-outline btn-lg" style="padding:.65rem 1.4rem;">
+              <i class="bi bi-grid me-2"></i>Explore Features
+            </a>
+          </div>
+          <p class="hero-note">
+            <i class="bi bi-shield-check me-1"></i>
+            Demo mode available — no hardware required to explore.
+          </p>
+        </div>
+
+        <div class="col-lg-5 d-none d-lg-block">
+          <div class="hero-preview">
+            <div class="row g-3">
+              <div class="col-6"><div class="hero-preview-tile">
+                <i class="bi bi-speedometer2"></i><div class="value">12.5</div>
+                <div class="label">L / min flow</div>
+              </div></div>
+              <div class="col-6"><div class="hero-preview-tile">
+                <i class="bi bi-water"></i><div class="value">450</div>
+                <div class="label">litres today</div>
+              </div></div>
+              <div class="col-6"><div class="hero-preview-tile">
+                <i class="bi bi-shield-exclamation"></i><div class="value">0</div>
+                <div class="label">active leaks</div>
+              </div></div>
+              <div class="col-6"><div class="hero-preview-tile">
+                <i class="bi bi-toggle-on"></i><div class="value">Open</div>
+                <div class="label">valve state</div>
+              </div></div>
+            </div>
+            <p class="text-center mb-0 mt-3" style="font-size:.72rem;color:rgba(255,255,255,.45);">
+              Sample preview — data is simulated in demo mode
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===================== FEATURES ===================== -->
+  <section class="section" id="features">
+    <div class="container">
+      <div class="text-center mb-5">
+        <h2 class="section-title">Everything you need to control water</h2>
+        <p class="section-subtitle">
+          From real-time flow monitoring to automatic leak response, AquaPulse
+          brings your water system into one clear view.
+        </p>
+      </div>
+      <div class="row g-4">
+        <div class="col-md-6 col-lg-4"><div class="feature-card">
+          <div class="feature-icon blue"><i class="bi bi-activity"></i></div>
+          <h5 class="fw-bold">Real-Time Flow Monitoring</h5>
+          <p class="text-muted mb-0">Watch live water flow rates (L/min) and consumption as readings arrive from your flow sensor.</p>
+        </div></div>
+        <div class="col-md-6 col-lg-4"><div class="feature-card">
+          <div class="feature-icon red"><i class="bi bi-exclamation-triangle"></i></div>
+          <h5 class="fw-bold">Automatic Leak Detection</h5>
+          <p class="text-muted mb-0">Get alerted when abnormal flow lasts too long, with severity levels from low to critical.</p>
+        </div></div>
+        <div class="col-md-6 col-lg-4"><div class="feature-card">
+          <div class="feature-icon green"><i class="bi bi-toggle-on"></i></div>
+          <h5 class="fw-bold">Valve Control</h5>
+          <p class="text-muted mb-0">Open or close the valve manually, or let the system respond automatically to critical leaks.</p>
+        </div></div>
+        <div class="col-md-6 col-lg-4"><div class="feature-card">
+          <div class="feature-icon orange"><i class="bi bi-bar-chart-line"></i></div>
+          <h5 class="fw-bold">Consumption Insights</h5>
+          <p class="text-muted mb-0">Understand daily, weekly and monthly usage with clear charts and period comparisons.</p>
+        </div></div>
+        <div class="col-md-6 col-lg-4"><div class="feature-card">
+          <div class="feature-icon blue"><i class="bi bi-bell"></i></div>
+          <h5 class="fw-bold">Smart Notifications</h5>
+          <p class="text-muted mb-0">Leaks, abnormal flow, valve issues and disconnections — all surfaced in one notification center.</p>
+        </div></div>
+        <div class="col-md-6 col-lg-4"><div class="feature-card">
+          <div class="feature-icon green"><i class="bi bi-file-earmark-text"></i></div>
+          <h5 class="fw-bold">Reports &amp; Exports</h5>
+          <p class="text-muted mb-0">Generate daily, weekly and monthly reports, then export to CSV or print a clean copy.</p>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== HOW IT WORKS ===================== -->
+  <section class="section bg-white" id="how-it-works">
+    <div class="container">
+      <div class="text-center mb-5">
+        <h2 class="section-title">How AquaPulse works</h2>
+        <p class="section-subtitle">A simple pipeline from sensor to dashboard.</p>
+      </div>
+      <div class="row g-4 text-center">
+        <div class="col-md-3"><div class="feature-icon blue mx-auto"><i class="bi bi-water"></i></div>
+          <h6 class="fw-bold mt-3">1. Sense</h6>
+          <p class="text-muted small mb-0">A water flow sensor measures flow rate.</p></div>
+        <div class="col-md-3"><div class="feature-icon blue mx-auto"><i class="bi bi-cpu"></i></div>
+          <h6 class="fw-bold mt-3">2. Send</h6>
+          <p class="text-muted small mb-0">An ESP32 microcontroller sends readings to the backend.</p></div>
+        <div class="col-md-3"><div class="feature-icon blue mx-auto"><i class="bi bi-diagram-3"></i></div>
+          <h6 class="fw-bold mt-3">3. Analyze</h6>
+          <p class="text-muted small mb-0">The backend detects leaks and stores history.</p></div>
+        <div class="col-md-3"><div class="feature-icon blue mx-auto"><i class="bi bi-speedometer2"></i></div>
+          <h6 class="fw-bold mt-3">4. Monitor</h6>
+          <p class="text-muted small mb-0">You monitor and control everything from this dashboard.</p></div>
+      </div>
+      <div class="text-center mt-5">
+        <a href="login.html" class="btn btn-ap-primary btn-lg">
+          <i class="bi bi-box-arrow-in-right me-2"></i>Open the Dashboard
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== STATS STRIP ===================== -->
+  <section class="stats-strip" id="about">
+    <div class="container">
+      <div class="row text-center g-4">
+        <div class="col-6 col-md-3"><div class="stat-value">24/7</div><div class="stat-label">Continuous monitoring</div></div>
+        <div class="col-6 col-md-3"><div class="stat-value">4</div><div class="stat-label">Leak severity levels</div></div>
+        <div class="col-6 col-md-3"><div class="stat-value">L</div><div class="stat-label">Litres-based reporting</div></div>
+        <div class="col-6 col-md-3"><div class="stat-value">Demo</div><div class="stat-label">Runs without hardware</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== FOOTER ===================== -->
+  <footer class="landing-footer">
+    <div class="container d-flex flex-column flex-md-row justify-content-between align-items-center gap-3">
+      <div class="ap-brand" style="color:#fff;">
+        <i class="bi bi-droplet-fill" style="color:#4fc3f7;"></i>
+        <span style="color:#fff;">AquaPulse</span>
+      </div>
+      <small>Frontend demo project — not connected to real hardware.</small>
+      <a href="login.html" class="landing-link">Sign In <i class="bi bi-arrow-right"></i></a>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="../js/main.js"></script>
+</body>
+</html>
