@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mineral Diagnostic System (SGL 201)</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --primary: #38bdf8;
+            --primary-hover: #0284c7;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent-green: #4ade80;
+            --border: #334155;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            max-width: 900px;
+            width: 100%;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 25px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 15px;
+        }
+
+        h1 {
+            color: var(--primary);
+            margin: 0 0 10px 0;
+        }
+
+        p.subtitle {
+            color: var(--text-muted);
+            margin: 0;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3);
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 5px;
+            font-size: 0.9em;
+            color: var(--primary);
+        }
+
+        select, input {
+            width: 100%;
+            padding: 10px;
+            background-color: #0f172a;
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            border-radius: 5px;
+            box-sizing: border-box;
+        }
+
+        select:focus, input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 5px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.2s background-color;
+        }
+
+        .btn-submit {
+            background-color: var(--primary);
+            color: #000;
+        }
+
+        .btn-submit:hover {
+            background-color: var(--primary-hover);
+            color: #fff;
+        }
+
+        .btn-reset {
+            background-color: #475569;
+            color: #fff;
+        }
+
+        .btn-reset:hover {
+            background-color: #64748b;
+        }
+
+        .result-card {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .result-box {
+            background-color: #0f172a;
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            padding: 15px;
+            min-height: 250px;
+            flex-grow: 1;
+        }
+
+        .mineral-match {
+            border-left: 4px solid var(--accent-green);
+            background: #112a20;
+            padding: 12px;
+            margin-bottom: 12px;
+            border-radius: 4px;
+        }
+
+        .mineral-name {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: var(--accent-green);
+        }
+
+        .match-score {
+            font-size: 0.85em;
+            color: var(--text-muted);
+            float: right;
+        }
+
+        .evidence-list {
+            margin: 5px 0 0 0;
+            padding-left: 20px;
+            font-size: 0.9em;
+            color: var(--text-muted);
+        }
+
+        .empty-state {
+            color: var(--text-muted);
+            text-align: center;
+            margin-top: 80px;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>💎 Mineral Diagnostic Expert System</h1>
+        <p class="subtitle">Enter observed mineral physical properties ("Symptoms") to identify the mineral ("Sickness")</p>
+    </header>
+
+    <div class="grid">
+        <!-- Diagnostic Input Form -->
+        <div class="card">
+            <h3>Symptom & Test Input Panel</h3>
+            <form id="diagForm">
+                
+                <div class="form-group">
+                    <label for="luster">Luster / Optics</label>
+                    <select id="luster">
+                        <option value="">-- Select Luster --</option>
+                        <option value="adamantine">Adamantine (Brilliant, high RI 1.9 - 2.6)</option>
+                        <option value="vitreous">Vitreous (Glassy)</option>
+                        <option value="metallic">Metallic / Opaque</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="hardness">Mohs Hardness (1 to 10)</label>
+                    <select id="hardness">
+                        <option value="">-- Select Hardness --</option>
+                        <option value="10">10 (Diamond)</option>
+                        <option value="kyanite_var">Directional Variable (4.5 parallel / 6.5 perpendicular)</option>
+                        <option value="soft">&lt; 2.5 (Soft)</option>
+                        <option value="hard">&gt; 5.5 (Hard)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="sg">Specific Gravity Range & Cation</label>
+                    <select id="sg">
+                        <option value="">-- Select SG / Chemical Group --</option>
+                        <option value="cerussite">SG ~ 6.58 (Contains Lead / Pb)</option>
+                        <option value="witherite">SG ~ 4.31 (Contains Barium / Ba)</option>
+                        <option value="strontianite">SG ~ 3.78 (Contains Strontium / Sr)</option>
+                        <option value="aragonite">SG ~ 2.93 (Contains Calcium / Ca)</option>
+                        <option value="olivine">SG ~ 3.22 to 4.41 (Mg-Fe substitution series)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="color">Color / Streak Behavior</label>
+                    <select id="color">
+                        <option value="">-- Select Color Feature --</option>
+                        <option value="blue_azurite">Inherent Blue (Cu-rich)</option>
+                        <option value="brown_goethite">Inherent Brown (Goethite)</option>
+                        <option value="orange_spessartine">Inherent Orange-Brown (Mn-rich)</option>
+                        <option value="exotic_corundum">Exotic: Pure is colorless, but Red (Ruby) with impurities</option>
+                        <option value="pleochroic">Pleochroic (Color changes with orientation)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="special">Special Diagnostic Tests</label>
+                    <select id="special">
+                        <option value="">-- Select Special Test --</option>
+                        <option value="magnet">Attracted to Hand Magnet (Iron / Magnetite / Pyrrhotite)</option>
+                        <option value="lum_willemite">UV Luminescence activated by Mn2+ substituting for Zn2+</option>
+                        <option value="lum_scheelite">UV Luminescence activated by Pb2+ or Mo6+</option>
+                        <option value="piezo">Piezoelectric nature (Used in electronics)</option>
+                    </select>
+                </div>
+
+                <div class="btn-group">
+                    <button type="button" class="btn-submit" onclick="diagnose()">Diagnose Mineral</button>
+                    <button type="reset" class="btn-reset" onclick="resetDiag()">Reset</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Output Display -->
+        <div class="card result-card">
+            <h3>Diagnostic Diagnosis Output</h3>
+            <div id="resultBox" class="result-box">
+                <div class="empty-state">Select symptoms on the left and click "Diagnose Mineral" to view diagnostic matches.</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const database = [
+        {
+            name: "Diamond",
+            symptoms: { luster: "adamantine", hardness: "10" },
+            details: "Extreme hardness (10), adamantine luster (RI = 2.45), highly efficient abrasive."
+        },
+        {
+            name: "Cerussite (PbCO3)",
+            symptoms: { sg: "cerussite" },
+            details: "Isostructural aragonite group mineral with high Specific Gravity (6.58) due to heavy Lead (Pb) cation."
+        },
+        {
+            name: "Witherite (BaCO3)",
+            symptoms: { sg: "witherite" },
+            details: "Isostructural aragonite group mineral with SG = 4.31 due to Barium (Ba) cation."
+        },
+        {
+            name: "Strontianite (SrCO3)",
+            symptoms: { sg: "strontianite" },
+            details: "Isostructural aragonite group mineral with SG = 3.78 due to Strontium (Sr) cation."
+        },
+        {
+            name: "Aragonite (CaCO3)",
+            symptoms: { sg: "aragonite" },
+            details: "Base aragonite group mineral with SG = 2.93 and Calcium (Ca) cation."
+        },
+        {
+            name: "Olivine Series ((Mg,Fe)2SiO4)",
+            symptoms: { sg: "olivine" },
+            details: "Specific gravity increases from 3.22 (Forsterite - Mg) to 4.41 (Fayalite - Fe) with iron substitution."
+        },
+        {
+            name: "Azurite",
+            symptoms: { color: "blue_azurite" },
+            details: "Inherent blue color derived from copper (Cu-rich) transition element content."
+        },
+        {
+            name: "Goethite",
+            symptoms: { color: "brown_goethite" },
+            details: "Inherent brown color characteristic of iron hydroxide minerals."
+        },
+        {
+            name: "Spessartine",
+            symptoms: { color: "orange_spessartine" },
+            details: "Inherent orange-brown color caused by essential Manganese (Mn-rich) composition."
+        },
+        {
+            name: "Corundum (Ruby / Sapphire)",
+            symptoms: { color: "exotic_corundum" },
+            details: "Exotic color causes: colorless when pure, but trace transition metals produce Red (Ruby) or Blue (Sapphire)."
+        },
+        {
+            name: "Kyanite",
+            symptoms: { hardness: "kyanite_var" },
+            details: "Directional hardness anisotropy: H = 4.5 parallel to c-axis, H = 6.5 perpendicular to c-axis."
+        },
+        {
+            name: "Willemite (Zn2SiO4)",
+            symptoms: { special: "lum_willemite" },
+            details: "Exhibits luminescence under UV excitation; activated by Mn2+ replacing Zn2+ in crystal lattice."
+        },
+        {
+            name: "Scheelite (CaWO4)",
+            symptoms: { special: "lum_scheelite" },
+            details: "Exhibits luminescence under UV excitation; activated by Pb2+ or Mo6+ substitutions."
+        },
+        {
+            name: "Magnetite / Pyrrhotite / Native Iron",
+            symptoms: { special: "magnet" },
+            details: "Noticeably attracted to a basic hand magnet due to ferromagnetic/ferrimagnetic properties."
+        },
+        {
+            name: "Quartz",
+            symptoms: { special: "piezo" },
+            details: "Exhibits piezoelectric property, making it essential for electronic frequency controls."
+        }
+    ];
+
+    function diagnose() {
+        const luster = document.getElementById('luster').value;
+        const hardness = document.getElementById('hardness').value;
+        const sg = document.getElementById('sg').value;
+        const color = document.getElementById('color').value;
+        const special = document.getElementById('special').value;
+
+        const inputs = { luster, hardness, sg, color, special };
+        const activeCriteria = Object.keys(inputs).filter(k => inputs[k] !== "");
+
+        if (activeCriteria.length === 0) {
+            document.getElementById('resultBox').innerHTML = '<div class="empty-state">Please select at least one physical property/symptom.</div>';
+            return;
+        }
+
+        let matches = [];
+
+        database.forEach(min => {
+            let score = 0;
+            let matchedCriteria = [];
+
+            for (let key in min.symptoms) {
+                if (inputs[key] && inputs[key] === min.symptoms[key]) {
+                    score++;
+                    matchedCriteria.push(key);
+                }
+            }
+
+            if (score > 0) {
+                matches.push({ mineral: min, score, matchedCriteria });
+            }
+        });
+
+        matches.sort((a, b) => b.score - a.score);
+
+        const resultBox = document.getElementById('resultBox');
+        if (matches.length === 0) {
+            resultBox.innerHTML = '<div class="empty-state">No direct match found for this combination of symptoms.</div>';
+            return;
+        }
+
+        let html = '';
+        matches.forEach(m => {
+            html += `
+                <div class="mineral-match">
+                    <span class="match-score">Match confidence: ${m.score}/${activeCriteria.length} criteria</span>
+                    <div class="mineral-name">Diagnosed: ${m.mineral.name}</div>
+                    <ul class="evidence-list">
+                        <li><strong>Diagnostic Details:</strong> ${m.mineral.details}</li>
+                    </ul>
+                </div>
+            `;
+        });
+
+        resultBox.innerHTML = html;
+    }
+
+    function resetDiag() {
+        document.getElementById('resultBox').innerHTML = '<div class="empty-state">Select symptoms on the left and click "Diagnose Mineral" to view diagnostic matches.</div>';
+    }
+</script>
+
+</body>
