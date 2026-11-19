@@ -58,7 +58,7 @@ ASGI_APPLICATION = "config.asgi.application"
 
 TEMPLATES = [{
     "BACKEND": "django.template.backends.django.DjangoTemplates",
-    "DIRS": [BASE_DIR / "templates"],
+    "DIRS": [BASE_DIR.parent / "frontend" / "templates"],
     "APP_DIRS": True,
     "OPTIONS": {"context_processors": [
         "django.template.context_processors.debug",
@@ -67,6 +67,10 @@ TEMPLATES = [{
         "django.contrib.messages.context_processors.messages",
     ]},
 }]
+
+STATICFILES_DIRS = [
+    BASE_DIR.parent / "frontend" / "static",
+]
 
 DATABASES = {
     "default": {
@@ -120,7 +124,10 @@ SPECTACULAR_SETTINGS = {
 }
 
 CORS_ALLOWED_ORIGINS = os.getenv(
-    "CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173"
+    "CORS_ALLOWED_ORIGINS",
+    "http://localhost:3000,http://127.0.0.1:3000,"
+    "http://localhost:5173,http://127.0.0.1:5173,"
+    "http://localhost:5500,http://127.0.0.1:5500",
 ).split(",")
 
 CHANNEL_LAYERS = {
