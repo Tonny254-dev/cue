@@ -180,35 +180,86 @@
 .ms-contact-bar {
   position: fixed;
   left: 50%;
-  bottom: 16px;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
   z-index: 1035;
   display: flex;
-  gap: 10px;
+  flex-wrap: nowrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
   padding: 8px 10px;
+  max-width: calc(100vw - 16px);
   background: rgba(15, 23, 42, 0.92);
   border: 1px solid rgba(148,163,184,.28);
   border-radius: 999px;
   box-shadow: var(--ms-shadow);
   backdrop-filter: blur(8px);
+  -webkit-overflow-scrolling: touch;
 }
 .ms-contact-bar a {
-  width: 46px;
-  height: 46px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
   border-radius: 50%;
   display: grid;
   place-items: center;
   color: #fff;
   text-decoration: none;
-  font-size: 1.15rem;
+  font-size: 1.1rem;
   transition: transform .15s ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  flex: 0 0 auto;
 }
-.ms-contact-bar a:hover { transform: translateY(-2px) scale(1.05); color: #fff; }
+.ms-contact-bar a:hover,
+.ms-contact-bar a:focus-visible {
+  transform: translateY(-2px) scale(1.05);
+  color: #fff;
+  outline: none;
+}
 .ms-contact-bar .wa { background: var(--ms-wa); }
 .ms-contact-bar .call { background: var(--ms-call); }
 .ms-contact-bar .sms { background: var(--ms-sms); }
+.ms-contact-bar .mail { background: #0ea5e9; }
+.ms-contact-bar .mail2 { background: #0284c7; }
 
-@media (max-width: 576px) {
-  .ms-fab-stack { right: 12px; bottom: 78px; }
+@media (max-width: 420px) {
+  .ms-contact-bar {
+    gap: 5px;
+    padding: 6px 7px;
+    border-radius: 18px;
+  }
+  .ms-contact-bar a {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    font-size: 1rem;
+  }
+  .ms-fab-stack {
+    right: max(10px, env(safe-area-inset-right));
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  }
+  .ms-chat-panel {
+    width: min(100vw - 16px, 380px);
+    height: min(68vh, 520px);
+  }
+  .ms-chat-launcher {
+    width: 52px;
+    height: 52px;
+  }
+}
+
+@media (min-width: 421px) and (max-width: 767.98px) {
+  .ms-fab-stack {
+    right: 14px;
+    bottom: calc(78px + env(safe-area-inset-bottom, 0px));
+  }
   .ms-chat-panel { height: min(70vh, 520px); }
+}
+
+@media (min-width: 768px) {
+  .ms-fab-stack {
+    bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+  }
 }

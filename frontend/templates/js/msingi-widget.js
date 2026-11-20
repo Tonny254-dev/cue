@@ -138,11 +138,20 @@
       '</div>'
     );
 
+    var mailBody = encodeURIComponent(
+      'Habari CUE team,\n\nMy name is: \nPhone: \n\nI would like help with: \n\nAsante.'
+    );
+    var mailSubject = encodeURIComponent('CUE inquiry');
+    var mail1 = 'mailto:itswanjiru@gmail.com?subject=' + mailSubject + '&body=' + mailBody;
+    var mail2 = 'mailto:brianziro44@gmail.com?subject=' + mailSubject + '&body=' + mailBody;
+
     var bar = el(
       '<div class="ms-contact-bar" id="msingiContactBar" aria-label="Quick contact">' +
         '<a class="wa" href="https://wa.me/' + PHONE_E164 + '" target="_blank" rel="noopener" title="WhatsApp" aria-label="WhatsApp"><i class="bi bi-whatsapp"></i></a>' +
         '<a class="call" href="tel:' + PHONE_DISPLAY + '" title="Call" aria-label="Call"><i class="bi bi-telephone-fill"></i></a>' +
         '<a class="sms" href="sms:' + PHONE_DISPLAY + '" title="SMS" aria-label="SMS"><i class="bi bi-chat-left-text-fill"></i></a>' +
+        '<a class="mail" href="' + mail1 + '" title="Email itswanjiru@gmail.com" aria-label="Email itswanjiru@gmail.com"><i class="bi bi-envelope-fill"></i></a>' +
+        '<a class="mail2" href="' + mail2 + '" title="Email brianziro44@gmail.com" aria-label="Email brianziro44@gmail.com"><i class="bi bi-envelope-at-fill"></i></a>' +
       '</div>'
     );
 
