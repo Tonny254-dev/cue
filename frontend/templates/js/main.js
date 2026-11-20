@@ -348,6 +348,17 @@
         backdrop.classList.remove('show');
       });
     }
+    // Close drawer after navigating on phones/tablets
+    if (sidebar) {
+      sidebar.querySelectorAll('a.ap-nav-item').forEach(function (link) {
+        link.addEventListener('click', function () {
+          if (window.innerWidth < 992) {
+            sidebar.classList.remove('show');
+            if (backdrop) backdrop.classList.remove('show');
+          }
+        });
+      });
+    }
 
     ['logoutBtn', 'logoutDropdown'].forEach(function (id) {
       var node = el(id);
