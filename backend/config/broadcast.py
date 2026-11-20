@@ -9,17 +9,29 @@ def _send(group: str, event: str, payload: dict):
                                              "event": event, "payload": payload})
 
 def broadcast_flow_reading(reading):
-    _send("monitoring", "flow_reading_updated", {
+    payload = {
         "sensor_id": reading.sensor_id,
         "flow_rate": float(reading.flow_rate),
         "volume": float(reading.volume),
         "timestamp": reading.reading_timestamp.isoformat(),
-    })
-    _send("dashboard", "flow_reading_updated", {
-        "sensor_id": reading.sensor_id,
-        "flow_rate": float(reading.flow_rate),
-        "timestamp": reading.reading_timestamp.isoformat(),
-    })
+    }
+    _send("monitoring", "flow_reading_updated", payload)
+    _send("dashboard", "flow_reading_updated", payload)
+
+
+def broadcast_kit_flow(inlet_reading, outlet_reading):
+    """Push S1/S2 pair from the Uno serial bridge to live UIs."""
+    payload = {
+        "sensor_id": inlet_reading.sensor_id,
+        "flow_rate": float(inlet_reading.flow_rate),
+        "inlet_lpm": float(inlet_reading.flow_rate),
+        "outlet_lpm": float(outlet_reading.flow_rate),
+        "volume": float(inlet_reading.volume),
+        "timestamp": inlet_reading.reading_timestamp.isoformat(),
+        "source": "serial",
+    }
+    _send("monitoring", "flow_reading_updated", payload)
+    _send("dashboard", "flow_reading_updated", payload)
 
 def broadcast_notification(notif):
     _send("notifications", "new_notification", {

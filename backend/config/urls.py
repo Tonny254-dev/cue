@@ -19,13 +19,15 @@ api_patterns = [
     path("", include("activity_logs.urls")),
     path("", include("system_settings.urls")),
     path("", include("iot.urls")),
+    path("", include("msingi.urls")),
+    path("", include("finance.urls")),
 ]
 
 
 def api_index(_request):
     """Small discovery page so hitting / is not a 404."""
     return JsonResponse({
-        "service": "MAWASCO Water Monitoring API",
+        "service": "CUE Water Monitoring API",
         "version": "1.0.0",
         "status": "running",
         "endpoints": {

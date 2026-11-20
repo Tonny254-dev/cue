@@ -30,6 +30,16 @@ class LeakEvent(TimeStampedModel):
     started_at = models.DateTimeField()
     resolved_at = models.DateTimeField(null=True, blank=True)
     description = models.TextField(blank=True)
+    # Firmware / locus pin
+    estimate_from_s1_m = models.FloatField(null=True, blank=True)
+    estimate_from_s2_m = models.FloatField(null=True, blank=True)
+    estimate_severity_pct = models.FloatField(null=True, blank=True)
+    estimate_summary = models.CharField(max_length=255, blank=True, default="")
+    raw_alert_line = models.CharField(max_length=255, blank=True, default="")
+    # TextSMS delivery
+    sms_sent = models.BooleanField(default=False)
+    sms_response = models.TextField(blank=True, default="")
+    sms_sent_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-started_at"]

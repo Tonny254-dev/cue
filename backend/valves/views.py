@@ -1,8 +1,8 @@
 from rest_framework.views import APIView
-from rest_framework import generics
+from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from core.permissions import IsOperatorOrAdmin
-from core.utils import success_response, created_response
+from core.utils import created_response, error_response
 from .models import Valve, ValveCommand
 from .serializers import ValveSerializer, ValveCommandSerializer
 from .services import request_command
@@ -33,10 +33,18 @@ class _ValveCommandAction(APIView):
     command_type = None
 
     def post(self, request, pk):
-        valve = Valve.objects.get(pk=pk)
+        try:
+            valve = Valve.objects.get(pk=pk)
+        except Valve.DoesNotExist:
+            return error_response(
+                "Valve not found",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
         cmd = request_command(valve, self.command_type, user=request.user)
-        return created_response(ValveCommandSerializer(cmd).data,
-                                "Command submitted — awaiting hardware confirmation")
+        return created_response(
+            ValveCommandSerializer(cmd).data,
+            "Command submitted — awaiting hardware confirmation",
+        )
 
 class ValveOpenView(_ValveCommandAction):
     command_type = ValveCommand.CommandType.OPEN

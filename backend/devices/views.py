@@ -1,18 +1,49 @@
-from rest_framework.views import APIView
 from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import APIView
+
 from core.permissions import RoleReadOnlyOrAdmin
 from core.utils import success_response
-from .models import Device, DeviceCommunicationLog
-from .serializers import DeviceSerializer, DeviceCommunicationLogSerializer
 
-class DeviceListView(generics.ListAPIView):
-    queryset = Device.objects.all()
-    serializer_class = DeviceSerializer
+from .models import Device, DeviceCommunicationLog
+from .serializers import DeviceCommunicationLogSerializer, DeviceSerializer
+from . import services
+
+
+class DeviceListView(APIView):
+    """Production inventory with live sensor/valve/heartbeat accuracy."""
+
     permission_classes = [IsAuthenticated, RoleReadOnlyOrAdmin]
-    filterset_fields = ["connection_status", "device_type", "is_active"]
-    search_fields = ["device_name", "device_identifier", "location"]
-    ordering_fields = ["created_at", "last_communication", "device_name"]
+
+    def get(self, request):
+        services.sync_stale_devices()
+        qs = Device.objects.all().prefetch_related("sensors", "valves").order_by("device_name")
+        dtype = request.query_params.get("device_type")
+        status = request.query_params.get("connection_status")
+        search = (request.query_params.get("search") or "").strip()
+        if dtype:
+            qs = qs.filter(device_type=dtype)
+        if status:
+            qs = qs.filter(connection_status=status)
+        if search:
+            from django.db.models import Q
+
+            qs = qs.filter(
+                Q(device_name__icontains=search)
+                | Q(device_identifier__icontains=search)
+                | Q(location__icontains=search)
+            )
+        rows = [services.device_inventory_row(d) for d in qs]
+        # Optional post-filter by effective connection
+        eff = request.query_params.get("effective_status")
+        if eff:
+            rows = [r for r in rows if r["connection_status"] == eff]
+        return success_response(
+            {
+                "devices": rows,
+                "summary": services.inventory_summary(rows),
+            }
+        )
 
 class ConnectedDeviceListView(generics.ListAPIView):
     queryset = Device.objects.filter(connection_status=Device.ConnectionStatus.CONNECTED)
@@ -41,20 +72,14 @@ class DeviceStatusView(APIView):
 
 class DeviceHealthView(APIView):
     permission_classes = [IsAuthenticated]
+
     def get(self, request, pk):
-        d = Device.objects.get(pk=pk)
-        sensors = list(d.sensors.values("id", "sensor_name", "status", "sensor_position"))
-        valves = list(d.valves.values("id", "valve_name", "current_status"))
-        healthy = d.connection_status == Device.ConnectionStatus.CONNECTED and d.is_active
-        return success_response({
-            "device": d.device_identifier,
-            "healthy": healthy,
-            "connection_status": d.connection_status,
-            "last_communication": d.last_communication,
-            "firmware_version": d.firmware_version,
-            "sensors": sensors,
-            "valves": valves,
-        })
+        services.sync_stale_devices()
+        d = Device.objects.prefetch_related("sensors", "valves").get(pk=pk)
+        row = services.device_inventory_row(d)
+        row["healthy"] = row["health"] == "HEALTHY"
+        row["device"] = d.device_identifier
+        return success_response(row)
 
 class DeviceCommunicationsView(generics.ListAPIView):
     serializer_class = DeviceCommunicationLogSerializer

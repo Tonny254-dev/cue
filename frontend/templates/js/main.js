@@ -1,5 +1,5 @@
 /* ============================================================
-   AQUAPULSE — main.js (corrected for MAWASCO Django backend)
+   CUE — main.js (corrected for CUE Django backend)
    ------------------------------------------------------------
    - JWT auth via window.Auth (js/auth.js)
    - Auto-redirect to login when no token
@@ -7,23 +7,29 @@
    - 401 → refresh → retry once → else redirect to login
    - WebSocket connects to /ws/stream/?token=<jwt>
      and subscribes to a named channel group
-   - All 12 page controllers registered:
+   - Page controllers registered:
        dashboard, live-monitoring, analytics, notifications,
        user-management, activity-logs, settings, profile,
-       devices, leak-detection, valve-control
+       devices, leak-detection, valve-control, finance
    ============================================================ */
 (function () {
   'use strict';
 
   /* ============================================================
      0. AUTH GATE — redirect before doing anything else
+     Public pages never auto-redirect to login/admin.
      ============================================================ */
+  var IS_PUBLIC_PAGE = /(^|\/)(index|home|login|forgot-password|register|contact|about|notices)\.html?$/i.test(location.pathname)
+    || /\/$/.test(location.pathname);
   var IS_LOGIN_PAGE = /(^|\/)login\.html?$/i.test(location.pathname);
   var HAS_TOKEN = !!localStorage.getItem('ap_access');
 
-  if (!IS_LOGIN_PAGE && !HAS_TOKEN) {
+  if (!IS_PUBLIC_PAGE && !HAS_TOKEN) {
     var _depth = (location.pathname.match(/\//g) || []).length;
     location.replace(_depth > 1 ? '../login.html' : 'login.html');
+    return;
+  }
+  if (IS_PUBLIC_PAGE && !IS_LOGIN_PAGE) {
     return;
   }
 
@@ -312,6 +318,8 @@
   function initTheme() { applyTheme(ThemeStore.get()); }
 
   function initShell() {
+    if (!IS_PUBLIC_PAGE) document.body.classList.add('ap-app-shell');
+
     var toggle = el('themeToggle');
     if (toggle) toggle.addEventListener('click', function () {
       var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
@@ -354,14 +362,27 @@
       });
     });
 
-    // Topbar identity from /auth/me/
-    if (localStorage.getItem('ap_access')) {
+    // Session gate + topbar identity from /auth/me/
+    if (localStorage.getItem('ap_access') && !IS_PUBLIC_PAGE) {
       Api.get('/auth/me/').then(function (u) {
+        if (!u || u.is_active === false || u.can_access_dashboard === false) {
+          localStorage.removeItem('ap_access');
+          localStorage.removeItem('ap_refresh');
+          localStorage.removeItem('ap_user');
+          location.replace('login.html');
+          return;
+        }
+        try { localStorage.setItem('ap_user', JSON.stringify(u)); } catch (_) {}
         var name = ((u.first_name || '') + ' ' + (u.last_name || '')).trim() || u.username || '—';
         setText('topbarUserName', name);
         var av = el('topbarAvatar');
         if (av) av.textContent = fmt.initials(name);
-      }).catch(function () {});
+      }).catch(function () {
+        localStorage.removeItem('ap_access');
+        localStorage.removeItem('ap_refresh');
+        localStorage.removeItem('ap_user');
+        location.replace('login.html');
+      });
     }
   }
 
@@ -387,22 +408,41 @@
      11. PAGE: dashboard
      ============================================================ */
   register('dashboard', function () {
-    var flowChart = null, usageChart = null, ws = null, pollTimer = null;
+    var flowChart = null, usageChart = null, ws = null;
+    var pollTimer = null, trendTimer = null, trendInFlight = false, lastTrendAt = 0;
+    var flowRange = 'live';
+    var chartRange = null;
+    var FLOW_COLORS = { INLET: '#3b82f6', OUTLET: '#22c55e', OTHER: '#f59e0b' };
+    var TREND_MS = { live: 2000, day: 15000, week: 60000, month: 60000 };
 
     function themeColors() {
       var dark = document.documentElement.getAttribute('data-theme') === 'dark';
       return { text: dark ? '#94a3b8' : '#5a6a85', grid: dark ? '#334155' : '#e5eaef', mode: dark ? 'dark' : 'light' };
     }
 
-    function loadOverview() {
+    function formatTrendLabel(iso, range) {
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return '';
+      if (range === 'month') {
+        return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      }
+      if (range === 'week') {
+        return d.toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+      }
+      return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: range === 'live' ? '2-digit' : undefined });
+    }
+
+    function markLive(note) {
+      setText('kpiFlowNote', note || ('Live · ' + new Date().toLocaleTimeString()));
+      setText('dashboardLastUpdated', 'Live · ' + new Date().toLocaleTimeString());
+    }
+
+    function loadOverview(silent) {
       Api.get('/dashboard/overview/').then(function (d) {
-        // {current_water_flow:{value,unit}, todays_consumption:{value,unit},
-        //  system_health:"HEALTHY", active_alerts:<n>, unread_notifications:<n>,
-        //  devices:{total,connected}}
         var flow = d.current_water_flow || {};
         setText('kpiFlow', fmt.num(flow.value));
         setText('kpiFlowUnit', flow.unit || 'L/min');
-        setText('kpiFlowNote', 'Live reading');
+        markLive('Live reading');
 
         var cons = d.todays_consumption || {};
         setText('kpiConsumption', fmt.num(cons.value));
@@ -420,50 +460,164 @@
         setText('kpiAlertsNote', (d.unread_notifications || 0) + ' unread');
 
         setText('dashboardSubtitle',
-          'System ' + health.toLowerCase() + ' · ' + alerts + ' active alert' + (alerts === 1 ? '' : 's'));
-        setText('dashboardLastUpdated', 'Updated ' + new Date().toLocaleTimeString());
+          'System ' + health.toLowerCase() + ' · ' + alerts + ' active alert' + (alerts === 1 ? '' : 's') + ' · auto-updating');
       }).catch(function (err) {
         console.error('[dashboard] overview failed:', err);
-        toast.error('Failed to load dashboard overview');
+        if (!silent) toast.error('Failed to load dashboard overview');
       });
     }
 
-    function renderFlowChart(rows) {
-      rows = Array.isArray(rows) ? rows : (rows.data || rows.results || []);
-      if (!rows.length) {
-        setHtml('flowChart', '<div class="text-center text-muted small py-5">No data</div>');
-        return;
+    function buildChartModel(payload) {
+      var seriesIn = [];
+      var count = 0;
+
+      if (payload && Array.isArray(payload.series) && payload.series.length) {
+        seriesIn = payload.series.filter(function (s) { return (s.data || []).length; });
+        count = payload.count || 0;
+      } else {
+        var rows = Array.isArray(payload) ? payload : (payload && (payload.data || payload.results)) || [];
+        seriesIn = rows.length ? [{ name: 'Flow', position: 'OTHER', data: rows.map(function (r) {
+          return { timestamp: r.timestamp || r.reading_timestamp, flow_rate: r.flow_rate };
+        })}] : [];
+        count = rows.length;
       }
-      var labels = rows.map(function (r) {
-        return new Date(r.timestamp || r.reading_timestamp).toLocaleTimeString();
+
+      var tsSet = {};
+      seriesIn.forEach(function (s) {
+        (s.data || []).forEach(function (p) {
+          if (p.timestamp) tsSet[p.timestamp] = true;
+        });
       });
-      var values = rows.map(function (r) { return Number(r.flow_rate) || 0; });
-      var c = themeColors();
-      setText('flowTrendRange', rows.length + ' readings');
+      var timestamps = Object.keys(tsSet).sort();
+      var labels = timestamps.map(function (t) { return formatTrendLabel(t, flowRange); });
+      var chartSeries = seriesIn.map(function (s) {
+        var byTs = {};
+        (s.data || []).forEach(function (p) { byTs[p.timestamp] = Number(p.flow_rate) || 0; });
+        return {
+          name: s.name || s.sensor || s.position || 'Flow',
+          data: timestamps.map(function (t) { return byTs[t] != null ? byTs[t] : null; }),
+        };
+      });
+      var colors = seriesIn.map(function (s) {
+        return FLOW_COLORS[s.position] || FLOW_COLORS.OTHER;
+      });
 
-      var options = {
-        chart: { type: 'area', height: 320, toolbar: { show: false }, animations: { speed: 400 } },
-        series: [{ name: 'Flow', data: values }],
-        xaxis: { categories: labels, labels: { style: { colors: c.text } } },
-        yaxis: { title: { text: 'L/min' }, labels: { style: { colors: c.text } } },
-        stroke: { curve: 'smooth', width: 2 },
-        colors: ['#3b82f6'],
-        dataLabels: { enabled: false },
-        tooltip: { y: { formatter: function (v) { return v + ' L/min'; } } },
-        grid: { borderColor: c.grid },
-        theme: { mode: c.mode },
+      return {
+        seriesIn: seriesIn,
+        count: count,
+        timestamps: timestamps,
+        labels: labels,
+        chartSeries: chartSeries,
+        colors: colors,
+        bucket: (payload && payload.bucket) || flowRange,
       };
+    }
 
+    function renderFlowChart(payload, forceRemount) {
+      var model = buildChartModel(payload);
       var target = el('flowChart');
       if (!target) return;
-      if (flowChart) { flowChart.updateOptions(options); flowChart.updateSeries(options.series); }
-      else { flowChart = new ApexCharts(target, options); flowChart.render(); }
+
+      if (!model.seriesIn.length || !model.timestamps.length) {
+        if (flowChart) { try { flowChart.destroy(); } catch (_) {} flowChart = null; chartRange = null; }
+        setHtml('flowChart', '<div class="text-center text-muted small py-5">Waiting for live sensor data…</div>');
+        setText('flowTrendRange', 'Listening…');
+        return;
+      }
+
+      setText('flowTrendRange',
+        (flowRange.charAt(0).toUpperCase() + flowRange.slice(1)) +
+        ' · auto · ' + model.seriesIn.length + ' sensor' + (model.seriesIn.length === 1 ? '' : 's') +
+        ' · ' + (model.count || model.timestamps.length) + ' pts · ' + model.bucket);
+
+      var c = themeColors();
+      var options = {
+        chart: {
+          type: 'area',
+          height: 320,
+          toolbar: { show: false },
+          animations: { enabled: true, easing: 'linear', dynamicAnimation: { speed: 350 } },
+          zoom: { enabled: false },
+        },
+        series: model.chartSeries,
+        xaxis: {
+          categories: model.labels,
+          labels: {
+            style: { colors: c.text },
+            rotate: flowRange === 'month' || flowRange === 'week' ? -45 : 0,
+            hideOverlappingLabels: true,
+            showDuplicates: false,
+          },
+          tickAmount: Math.min(12, model.labels.length),
+        },
+        yaxis: { title: { text: 'L/min' }, labels: { style: { colors: c.text } } },
+        stroke: { curve: 'smooth', width: 2 },
+        colors: model.colors,
+        dataLabels: { enabled: false },
+        legend: { position: 'top', labels: { colors: c.text } },
+        tooltip: { shared: true, y: { formatter: function (v) { return (v == null ? '—' : v) + ' L/min'; } } },
+        grid: { borderColor: c.grid },
+        theme: { mode: c.mode },
+        fill: { type: 'gradient', gradient: { opacityFrom: 0.35, opacityTo: 0.05 } },
+      };
+
+      var remount = forceRemount || !flowChart || chartRange !== flowRange;
+      if (remount) {
+        if (flowChart) {
+          try { flowChart.destroy(); } catch (_) {}
+          flowChart = null;
+        }
+        target.innerHTML = '';
+        flowChart = new ApexCharts(target, options);
+        flowChart.render();
+        chartRange = flowRange;
+        return;
+      }
+
+      // Soft live update — no flicker / no page refresh
+      flowChart.updateOptions({
+        xaxis: options.xaxis,
+        colors: options.colors,
+        theme: options.theme,
+        grid: options.grid,
+        legend: options.legend,
+      }, false, false);
+      flowChart.updateSeries(options.series, true);
     }
 
-    function loadFlowTrend() {
-      Api.get('/dashboard/flow-trend/').then(renderFlowChart)
-        .catch(function (err) { console.error('[dashboard] flow-trend failed:', err); setError('flowChart', 'Could not load flow trend'); });
+    function scheduleTrendPolling() {
+      if (trendTimer) { clearInterval(trendTimer); trendTimer = null; }
+      var ms = TREND_MS[flowRange] || 15000;
+      trendTimer = setInterval(function () { loadFlowTrend(true); }, ms);
     }
+
+    function setFlowRange(next) {
+      flowRange = next || 'live';
+      document.querySelectorAll('#flowTrendRangeBtns [data-flow-range]').forEach(function (btn) {
+        btn.classList.toggle('active', btn.getAttribute('data-flow-range') === flowRange);
+      });
+      scheduleTrendPolling();
+      loadFlowTrend(false);
+    }
+
+    function loadFlowTrend(silent) {
+      if (trendInFlight) return;
+      trendInFlight = true;
+      Api.get('/dashboard/flow-trend/', { query: { range: flowRange } }).then(function (payload) {
+        renderFlowChart(payload, false);
+        lastTrendAt = Date.now();
+        markLive();
+      }).catch(function (err) {
+        console.error('[dashboard] flow-trend failed:', err);
+        if (!silent) setError('flowChart', 'Could not load flow trend');
+      }).then(function () { trendInFlight = false; });
+    }
+
+    document.querySelectorAll('#flowTrendRangeBtns [data-flow-range]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        setFlowRange(btn.getAttribute('data-flow-range'));
+      });
+    });
 
     function renderUsage(rows) {
       rows = Array.isArray(rows) ? rows : (rows.data || rows.results || []);
@@ -540,31 +694,46 @@
         onMessage: function (evt) {
           var type = evt.type, data = evt.data || {};
           if (type === 'flow_reading_updated') {
-            setText('kpiFlow', fmt.num(data.flow_rate));
-            setText('kpiFlowNote', 'Live · ' + new Date().toLocaleTimeString());
+            var rate = data.inlet_lpm != null ? data.inlet_lpm : data.flow_rate;
+            setText('kpiFlow', fmt.num(rate));
+            markLive('Live from sensor');
+            // Keep chart streaming without a page refresh
+            if (flowRange === 'live' && Date.now() - lastTrendAt > 900) {
+              loadFlowTrend(true);
+            }
           }
           if (type === 'new_notification') {
             var dot = el('topbarUnreadDot'); if (dot) dot.classList.remove('d-none');
           }
         },
+        onStatus: function (s) {
+          if (s === 'OPEN') markLive('Live · connected');
+        },
       });
     }
 
     window.addEventListener('themeChanged', function () {
-      if (flowChart) loadFlowTrend();
+      loadFlowTrend(true);
       if (usageChart) loadConsumption();
     });
 
-    loadOverview();
-    loadFlowTrend();
+    // Initial paint + continuous auto-update (no manual refresh needed)
+    loadOverview(true);
+    setFlowRange('live');
     loadConsumption();
     loadActivity();
     loadConnectivity();
     connectWS();
 
-    pollTimer = setInterval(loadOverview, 30000);
+    pollTimer = setInterval(function () {
+      loadOverview(true);
+      loadConnectivity();
+      if (flowRange !== 'live') loadFlowTrend(true);
+    }, 10000);
+
     window.addEventListener('beforeunload', function () {
       if (pollTimer) clearInterval(pollTimer);
+      if (trendTimer) clearInterval(trendTimer);
       if (ws) ws.close();
     });
   });
@@ -924,12 +1093,15 @@
      14. PAGE: notifications
      ============================================================ */
   register('notifications', function () {
-    var state = { page: 1, pageSize: 20, search: '', severity: '', status: '', type: '', items: [], total: 0 };
+    var state = {
+      page: 1, pageSize: 20, search: '', severity: '', status: '', type: '', audience: '',
+      items: [], total: 0,
+    };
     var ws = null, searchTimer = null;
 
     function loadList() {
       var listEl = el('notifList');
-      if (listEl) listEl.innerHTML = '<div class="p-4 text-center text-muted small">Loading notifications…</div>';
+      if (listEl) listEl.innerHTML = '<div class="p-5 text-center text-muted small">Loading notifications…</div>';
       Api.get('/notifications/', {
         query: {
           page: state.page, page_size: state.pageSize,
@@ -937,6 +1109,7 @@
           severity: state.severity || undefined,
           is_read: state.status === 'READ' ? true : state.status === 'UNREAD' ? false : undefined,
           notification_type: state.type || undefined,
+          audience: state.audience || undefined,
         },
       }).then(function (data) {
         var rows = toArray(data);
@@ -945,55 +1118,98 @@
         renderList(rows);
         renderPagination(total);
         updateSummary(rows, total);
-      }).catch(function (err) { console.error('[notif] load failed:', err); setError('notifList', 'Could not load notifications'); });
+      }).catch(function (err) {
+        console.error('[notif] load failed:', err);
+        setError('notifList', 'Could not load notifications');
+      });
     }
 
     function updateSummary(rows, total) {
       var unread = rows.filter(function (n) { return !n.is_read; }).length;
-      setText('notifSummary', total + ' notification' + (total !== 1 ? 's' : '') + ' · ' + unread + ' unread');
+      var publicLive = rows.filter(function (n) {
+        return n.audience === 'PUBLIC' && n.is_active !== false;
+      }).length;
+      var critical = rows.filter(function (n) {
+        return String(n.severity || '').toUpperCase() === 'CRITICAL';
+      }).length;
+      setText('notifSummary', total + ' in view · ' + unread + ' unread · publish to operators or the public website');
+      setText('notifKpiTotal', fmt.int(total));
+      setText('notifKpiUnread', fmt.int(unread));
+      setText('notifKpiPublic', fmt.int(publicLive));
+      setText('notifKpiCritical', fmt.int(critical));
       var dot = el('topbarUnreadDot');
-      if (dot) { if (unread > 0) dot.classList.remove('d-none'); else dot.classList.add('d-none'); }
+      if (dot) {
+        if (unread > 0) dot.classList.remove('d-none');
+        else dot.classList.add('d-none');
+      }
     }
 
     function severityIcon(sev) {
       var s = (sev || 'INFO').toUpperCase();
-      if (s === 'CRITICAL') return { icon: 'bi-shield-exclamation', bg: 'bg-red-light text-red' };
-      if (s === 'WARNING')  return { icon: 'bi-exclamation-triangle', bg: 'bg-orange-light text-orange' };
-      return { icon: 'bi-info-circle', bg: 'bg-blue-light text-blue' };
+      if (s === 'CRITICAL') return { icon: 'bi-shield-exclamation', bg: 'bg-red-light text-red', chip: 'critical' };
+      if (s === 'WARNING') return { icon: 'bi-exclamation-triangle', bg: 'bg-orange-light text-orange', chip: 'warning' };
+      return { icon: 'bi-info-circle', bg: 'bg-blue-light text-blue', chip: 'info' };
     }
 
     function renderList(rows) {
       var listEl = el('notifList');
       if (!listEl) return;
       if (!rows.length) {
-        listEl.innerHTML = '<div class="p-4 text-center text-muted small">No notifications</div>';
+        listEl.innerHTML = '<div class="p-5 text-center text-muted">No notifications match your filters.</div>';
         return;
       }
       listEl.innerHTML = rows.map(function (n) {
         var isRead = !!n.is_read;
-        var meta = severityIcon(n.severity);
-        return '<div class="list-group-item p-4 border-bottom" style="border-color:var(--border-color)!important;' + (isRead ? 'opacity:0.7;' : '') + '">' +
-          '<div class="d-flex gap-3">' +
-            '<div class="kpi-icon ' + meta.bg + ' flex-shrink-0"><i class="bi ' + meta.icon + '"></i></div>' +
-            '<div class="flex-grow-1">' +
-              '<div class="d-flex justify-content-between align-items-start mb-1">' +
-                '<h6 class="mb-0 fw-bold">' + escapeHtml(n.title || n.notification_type || '—') + '</h6>' +
-                '<span class="text-muted small">' + fmt.timeAgo(n.created_at) + '</span>' +
-              '</div>' +
-              (n.message ? '<p class="text-muted mb-2 small">' + escapeHtml(n.message) + '</p>' : '') +
-              (!isRead ? '<div><button class="btn btn-sm btn-outline-secondary" data-action="mark-read" data-id="' + escapeHtml(n.id) + '">Mark Read</button></div>' : '') +
+        var sev = String(n.severity || 'INFO').toUpperCase();
+        var meta = severityIcon(sev);
+        var audience = (n.audience || 'INTERNAL').toUpperCase();
+        var cls = 'notif-item'
+          + (isRead ? '' : ' is-unread')
+          + (audience === 'PUBLIC' ? ' is-public' : '')
+          + (sev === 'CRITICAL' ? ' is-critical' : sev === 'WARNING' ? ' is-warning' : '');
+        var actions = '';
+        if (!isRead) {
+          actions += '<button class="btn btn-sm btn-outline-primary" data-action="mark-read" data-id="' + n.id + '">Mark read</button> ';
+        }
+        if (audience === 'PUBLIC' && n.is_active !== false) {
+          actions += '<button class="btn btn-sm btn-outline-secondary" data-action="deactivate" data-id="' + n.id + '">Unpublish</button>';
+        }
+        return '<article class="' + cls + '">' +
+          '<div class="kpi-icon ' + meta.bg + ' flex-shrink-0"><i class="bi ' + meta.icon + '"></i></div>' +
+          '<div class="notif-item-body">' +
+            '<div class="d-flex justify-content-between gap-3 align-items-start">' +
+              '<h3 class="notif-item-title">' + escapeHtml(n.title || n.notification_type || 'Notice') +
+                (n.is_pinned ? ' <i class="bi bi-pin-angle-fill text-warning" title="Pinned"></i>' : '') +
+              '</h3>' +
+              '<span class="text-muted small text-nowrap">' + fmt.timeAgo(n.created_at) + '</span>' +
             '</div>' +
-            (isRead ? '' : '<div class="ms-2"><span class="badge bg-primary rounded-pill">New</span></div>') +
+            (n.message ? '<p class="notif-item-msg">' + escapeHtml(n.message) + '</p>' : '') +
+            '<div class="notif-meta">' +
+              '<span class="notif-chip ' + (audience === 'PUBLIC' ? 'public' : 'internal') + '">' +
+                (audience === 'PUBLIC' ? 'Public' : 'Internal') + '</span>' +
+              '<span class="notif-chip ' + meta.chip + '">' + escapeHtml(sev) + '</span>' +
+              '<span class="notif-chip">' + escapeHtml(n.notification_type || 'SYSTEM') + '</span>' +
+              (n.created_by_username ? '<span class="notif-chip">by ' + escapeHtml(n.created_by_username) + '</span>' : '') +
+              (!isRead ? '<span class="badge bg-primary rounded-pill">New</span>' : '') +
+              (n.is_active === false ? '<span class="notif-chip">Inactive</span>' : '') +
+            '</div>' +
+            (actions ? '<div class="mt-2 d-flex gap-2 flex-wrap">' + actions + '</div>' : '') +
           '</div>' +
-        '</div>';
+        '</article>';
       }).join('');
 
       listEl.querySelectorAll('[data-action="mark-read"]').forEach(function (btn) {
         btn.addEventListener('click', function () {
-          var id = btn.getAttribute('data-id');
-          Api.patch('/notifications/' + id + '/read/', {}).then(function () {
+          Api.patch('/notifications/' + btn.getAttribute('data-id') + '/read/', {}).then(function () {
             toast.success('Marked as read'); loadList();
           }).catch(function (err) { toast.error(err.message || 'Could not mark as read'); });
+        });
+      });
+      listEl.querySelectorAll('[data-action="deactivate"]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          Api.post('/notifications/' + btn.getAttribute('data-id') + '/deactivate/', {}).then(function () {
+            toast.success('Removed from public site'); loadList();
+          }).catch(function (err) { toast.error(err.message || 'Could not unpublish'); });
         });
       });
     }
@@ -1004,7 +1220,7 @@
       var pages = Math.max(1, Math.ceil(total / state.pageSize));
       var from = total === 0 ? 0 : (state.page - 1) * state.pageSize + 1;
       var to = Math.min(state.page * state.pageSize, total);
-      info.textContent = 'Showing ' + from + ' to ' + to + ' of ' + total;
+      info.textContent = 'Showing ' + from + '–' + to + ' of ' + total;
 
       var html = '<li class="page-item ' + (state.page === 1 ? 'disabled' : '') + '"><a class="page-link" href="#" data-page="' + (state.page - 1) + '">Previous</a></li>';
       for (var p = 1; p <= pages; p++) {
@@ -1016,7 +1232,6 @@
       }
       html += '<li class="page-item ' + (state.page === pages ? 'disabled' : '') + '"><a class="page-link" href="#" data-page="' + (state.page + 1) + '">Next</a></li>';
       pag.innerHTML = html;
-
       pag.querySelectorAll('[data-page]').forEach(function (a) {
         a.addEventListener('click', function (e) {
           e.preventDefault();
@@ -1035,6 +1250,40 @@
         .finally(function () { if (btn) btn.disabled = false; });
     }
 
+    function publishNotice() {
+      var title = (el('notifTitle') && el('notifTitle').value || '').trim();
+      var message = (el('notifMessage') && el('notifMessage').value || '').trim();
+      if (!title || !message) {
+        toast.warn('Title and message are required');
+        return;
+      }
+      var btn = el('notifPublishBtn');
+      if (btn) btn.disabled = true;
+      Api.post('/notifications/create/', {
+        title: title,
+        message: message,
+        audience: (el('notifAudience') && el('notifAudience').value) || 'PUBLIC',
+        severity: (el('notifSeverity') && el('notifSeverity').value) || 'INFO',
+        is_pinned: !!(el('notifPinned') && el('notifPinned').checked),
+      }).then(function () {
+        toast.success('Notification published');
+        if (el('notifTitle')) el('notifTitle').value = '';
+        if (el('notifMessage')) el('notifMessage').value = '';
+        if (el('notifPinned')) el('notifPinned').checked = false;
+        var box = el('notifCompose');
+        if (box && window.bootstrap) {
+          var c = bootstrap.Collapse.getOrCreateInstance(box, { toggle: false });
+          c.hide();
+        }
+        state.page = 1;
+        loadList();
+      }).catch(function (err) {
+        toast.error(err.message || 'Publish failed');
+      }).finally(function () {
+        if (btn) btn.disabled = false;
+      });
+    }
+
     function connectWS() {
       ws = new WSClient('notifications', {
         onMessage: function (evt) {
@@ -1049,47 +1298,178 @@
     var search = el('notifSearch');
     if (search) search.addEventListener('input', function (e) {
       clearTimeout(searchTimer);
-      searchTimer = setTimeout(function () { state.search = e.target.value.trim(); state.page = 1; loadList(); }, 350);
+      searchTimer = setTimeout(function () {
+        state.search = e.target.value.trim();
+        state.page = 1;
+        loadList();
+      }, 350);
     });
     [
       ['notifSeverityFilter', 'severity'],
-      ['notifStatusFilter',   'status'],
+      ['notifStatusFilter', 'status'],
       ['notifCategoryFilter', 'type'],
+      ['notifAudienceFilter', 'audience'],
     ].forEach(function (pair) {
       var node = el(pair[0]);
-      if (node) node.addEventListener('change', function (e) { state[pair[1]] = e.target.value; state.page = 1; loadList(); });
+      if (node) node.addEventListener('change', function (e) {
+        state[pair[1]] = e.target.value;
+        state.page = 1;
+        loadList();
+      });
     });
     var mAll = el('markAllReadBtn'); if (mAll) mAll.addEventListener('click', markAllRead);
+    var pub = el('notifPublishBtn'); if (pub) pub.addEventListener('click', publishNotice);
 
     loadList();
     connectWS();
   });
 
   /* ============================================================
-     15. PAGE: user-management
-     Backend has NO /auth/users/ endpoint. Show informational message.
-     If you add the endpoint later, swap ENDPOINT below.
+     15. PAGE: user-management (in-app — /auth/users/)
      ============================================================ */
   register('user-management', function () {
-    // Backend doesn't expose user CRUD. Offer a read-only view via activity-logs
-    // (unique actors from logs) and instruct the operator to use /admin/ for CRUD.
-    var tbody = el('umTableBody');
-    var pageInfo = el('umPageInfo');
-    if (pageInfo) pageInfo.textContent = 'Backend does not expose user CRUD — use Django admin at /admin/';
+    var state = { search: '', role: '', status: '', users: [] };
+    var modal = null;
+
+    function fullName(u) {
+      return ((u.first_name || '') + ' ' + (u.last_name || '')).trim() || u.username;
+    }
+
+    function loadUsers() {
+      var tbody = el('umTableBody');
+      if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Loading users…</td></tr>';
+      Api.get('/auth/users/', {
+        query: {
+          search: state.search || undefined,
+          role: state.role || undefined,
+          status: state.status || undefined,
+        },
+      }).then(function (data) {
+        var rows = (data && data.users) || toArray(data);
+        var summary = (data && data.summary) || {};
+        state.users = rows;
+        setText('umTotal', fmt.int(summary.total != null ? summary.total : rows.length));
+        setText('umActive', fmt.int(summary.active != null ? summary.active : rows.filter(function (u) { return u.is_active; }).length));
+        setText('umAdmins', fmt.int(summary.admins != null ? summary.admins : rows.filter(function (u) { return u.role === 'ADMIN'; }).length));
+        setText('umInactive', fmt.int(summary.inactive != null ? summary.inactive : rows.filter(function (u) { return !u.is_active; }).length));
+        setText('umPageInfo', rows.length + ' account' + (rows.length !== 1 ? 's' : ''));
+        renderUsers(rows);
+      }).catch(function (err) {
+        toast.error(err.message || 'Could not load users');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger py-4">' + escapeHtml(err.message || 'Failed') + '</td></tr>';
+      });
+    }
+
+    function renderUsers(rows) {
+      var tbody = el('umTableBody'); if (!tbody) return;
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No users found</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map(function (u) {
+        var name = fullName(u);
+        return '<tr>' +
+          '<td><div class="d-flex align-items-center gap-2">' +
+            '<div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center" style="width:32px;height:32px;font-size:.75rem;font-weight:bold;">' +
+              escapeHtml(fmt.initials(name)) + '</div>' +
+            '<div><div class="fw-semibold">' + escapeHtml(name) + '</div>' +
+            '<div class="small text-muted">@' + escapeHtml(u.username) + ' · ' + escapeHtml(u.email || '—') + '</div></div>' +
+          '</div></td>' +
+          '<td>' + statusBadge(u.role || 'VIEWER') + '</td>' +
+          '<td>' + statusBadge(u.is_active ? 'ACTIVE' : 'INACTIVE') + '</td>' +
+          '<td class="small text-muted">' + (u.last_login ? fmt.timeAgo(u.last_login) : 'Never') + '</td>' +
+          '<td class="text-nowrap">' +
+            '<button class="btn btn-sm btn-outline-primary me-1" data-act="edit" data-id="' + u.id + '">Edit</button>' +
+            (u.is_active
+              ? '<button class="btn btn-sm btn-outline-danger" data-act="deactivate" data-id="' + u.id + '">Deactivate</button>'
+              : '<button class="btn btn-sm btn-outline-success" data-act="activate" data-id="' + u.id + '">Activate</button>') +
+          '</td>' +
+        '</tr>';
+      }).join('');
+
+      tbody.querySelectorAll('[data-act]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var id = Number(btn.getAttribute('data-id'));
+          var act = btn.getAttribute('data-act');
+          var user = state.users.find(function (x) { return x.id === id; });
+          if (!user) return;
+          if (act === 'edit') openModal(user);
+          if (act === 'deactivate' || act === 'activate') {
+            Api.patch('/auth/users/' + id + '/', { is_active: act === 'activate' }).then(function () {
+              toast.success(act === 'activate' ? 'User activated' : 'User deactivated');
+              loadUsers();
+            }).catch(function (err) { toast.error(err.message || 'Update failed'); });
+          }
+        });
+      });
+    }
+
+    function openModal(user) {
+      var form = el('userForm'); if (!form) return;
+      form.reset();
+      el('userFormId').value = user ? user.id : '';
+      el('userFormTitle').textContent = user ? 'Edit User' : 'Add New User';
+      form.elements.full_name.value = user ? fullName(user) : '';
+      form.elements.username.value = user ? (user.username || '') : '';
+      form.elements.email.value = user ? (user.email || '') : '';
+      form.elements.role.value = user ? (user.role || 'VIEWER') : 'VIEWER';
+      form.elements.password.value = '';
+      form.elements.password.required = !user;
+      if (!modal && window.bootstrap) {
+        modal = new bootstrap.Modal(el('userFormModal'));
+      }
+      if (modal) modal.show();
+      else if (el('userFormModal')) el('userFormModal').classList.add('show');
+    }
+
+    function saveUser(e) {
+      e.preventDefault();
+      var form = el('userForm');
+      var id = el('userFormId').value;
+      var full = (form.elements.full_name.value || '').trim();
+      var parts = full.split(/\s+/);
+      var payload = {
+        username: form.elements.username.value.trim(),
+        email: form.elements.email.value.trim(),
+        first_name: parts[0] || '',
+        last_name: parts.slice(1).join(' ') || '',
+        role: form.elements.role.value,
+      };
+      var pwd = form.elements.password.value;
+      if (pwd) payload.password = pwd;
+      if (!id && !pwd) { toast.warn('Password is required for new users'); return; }
+
+      var req = id
+        ? Api.patch('/auth/users/' + id + '/', payload)
+        : Api.post('/auth/users/', payload);
+      var submit = el('userFormSubmit');
+      if (submit) submit.disabled = true;
+      req.then(function () {
+        toast.success(id ? 'User updated' : 'User created');
+        if (modal) modal.hide();
+        loadUsers();
+      }).catch(function (err) {
+        toast.error(err.message || 'Save failed');
+      }).finally(function () {
+        if (submit) submit.disabled = false;
+      });
+    }
 
     var addBtn = el('addUserBtn');
-    if (addBtn) {
-      addBtn.disabled = true;
-      addBtn.title = 'Managed via Django admin (/admin/)';
-    }
+    if (addBtn) addBtn.addEventListener('click', function () { openModal(null); });
+    var form = el('userForm');
+    if (form) form.addEventListener('submit', saveUser);
+    var search = el('umSearch');
+    if (search) search.addEventListener('input', function (e) {
+      state.search = e.target.value.trim();
+      loadUsers();
+    });
+    var roleF = el('umRoleFilter');
+    if (roleF) roleF.addEventListener('change', function (e) { state.role = e.target.value; loadUsers(); });
+    var stF = el('umStatusFilter');
+    if (stF) stF.addEventListener('change', function (e) { state.status = e.target.value; loadUsers(); });
 
-    if (tbody) {
-      tbody.innerHTML =
-        '<tr><td colspan="5" class="text-center text-muted py-4">' +
-          'User management is handled via the <a href="http://localhost:8000/admin/accounts/user/" target="_blank">Django admin</a>.' +
-        '</td></tr>';
-    }
-    ['umTotal','umActive','umAdmins','umInactive'].forEach(function (id) { setText(id, '—'); });
+    loadUsers();
   });
 
   /* ============================================================
@@ -1109,31 +1489,49 @@
     })();
 
     function loadUsersForFilter() {
-      // Backend has no user list endpoint; populate from /activity-logs/users/
-      // which returns activity rows, then dedupe by user/username.
-      Api.get('/activity-logs/users/', { query: { page_size: 200 } }).then(function (data) {
-        var rows = toArray(data);
-        var seen = {};
-        var sel = el('alUserFilter'); if (!sel) return;
-        rows.forEach(function (r) {
-          var uid = r.user;
-          var name = r.username || r.user_name || ('User #' + uid);
-          if (!uid || seen[uid]) return;
-          seen[uid] = true;
+      var sel = el('alUserFilter'); if (!sel) return;
+      Api.get('/auth/users/').then(function (data) {
+        var rows = (data && data.users) || toArray(data);
+        rows.forEach(function (u) {
           var opt = document.createElement('option');
-          opt.value = String(uid);
-          opt.textContent = name;
+          opt.value = String(u.id);
+          opt.textContent = u.username || ('User #' + u.id);
           sel.appendChild(opt);
         });
-      }).catch(function () { /* not critical */ });
+      }).catch(function () {
+        Api.get('/activity-logs/', { query: { page_size: 100 } }).then(function (data) {
+          var seen = {};
+          toArray(data).forEach(function (r) {
+            if (!r.user || seen[r.user]) return;
+            seen[r.user] = true;
+            var opt = document.createElement('option');
+            opt.value = String(r.user);
+            opt.textContent = r.username || ('User #' + r.user);
+            sel.appendChild(opt);
+          });
+        }).catch(function () {});
+      });
+    }
+
+    function humanAction(action) {
+      return String(action || '')
+        .replace(/_/g, ' ')
+        .toLowerCase()
+        .replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+    }
+
+    function actionStatus(action) {
+      var a = String(action || '').toUpperCase();
+      if (/FAIL|ERROR|DENIED/.test(a)) return 'FAILED';
+      if (/PENDING|REQUESTED/.test(a)) return 'PENDING';
+      if (/LOGIN|LOGOUT|EXECUTED|SUCCESS|OPEN|CLOSE|CREATED|UPDATED/.test(a)) return 'OK';
+      return 'RECORDED';
     }
 
     function loadLogs() {
       var tbody = el('alTableBody');
       if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Loading activity…</td></tr>';
 
-      // Backend filters: category, user, device via django-filter. Date range via start/end? No —
-      // activity-logs uses ordering + category + user + device. Add date via custom query if present.
       var query = {
         page: state.page,
         page_size: state.pageSize,
@@ -1141,9 +1539,8 @@
         user: state.userId || undefined,
         ordering: '-created_at',
       };
-      // Try start/end as created_at gte/lte (may be ignored gracefully)
       if (state.startDate) query['created_at__gte'] = state.startDate;
-      if (state.endDate)   query['created_at__lte'] = state.endDate + 'T23:59:59Z';
+      if (state.endDate) query['created_at__lte'] = state.endDate + 'T23:59:59Z';
 
       Api.get('/activity-logs/', { query: query }).then(function (data) {
         var rows = toArray(data);
@@ -1153,29 +1550,41 @@
         renderPagination(total);
         setText('alCount', total + ' event' + (total !== 1 ? 's' : ''));
         setText('alSubtitle', 'Audit trail · ' + total + ' recorded event' + (total !== 1 ? 's' : ''));
-      }).catch(function (err) { console.error('[activity] load failed:', err); setError('alTableBody', 'Could not load activity logs'); });
+      }).catch(function (err) {
+        console.error('[activity] load failed:', err);
+        if (tbody) {
+          tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger py-4">' +
+            escapeHtml(err.message || 'Could not load activity logs') + '</td></tr>';
+        }
+      });
     }
 
     function renderTable(rows) {
       var tbody = el('alTableBody'); if (!tbody) return;
       if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No activity</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-5">No activity for this filter range.</td></tr>';
         return;
       }
       tbody.innerHTML = rows.map(function (r) {
         var ts = r.created_at || r.timestamp;
         var name = r.username || r.user_name || 'System';
-        var category = (r.category || '').toUpperCase();
+        var category = (r.category || 'SYSTEM').toUpperCase();
+        var desc = r.description || humanAction(r.action) || '—';
         var isSystem = !r.user;
         var avatar = isSystem
-          ? '<div class="bg-secondary text-white rounded-circle d-flex align-items-center justify-content-center" style="width:24px;height:24px;"><i class="bi bi-cpu" style="font-size:.7rem;"></i></div>'
-          : '<div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center" style="width:24px;height:24px;font-size:.7rem;font-weight:bold;">' + escapeHtml(fmt.initials(name)) + '</div>';
+          ? '<div class="bg-secondary text-white rounded-circle d-flex align-items-center justify-content-center" style="width:28px;height:28px;"><i class="bi bi-cpu" style="font-size:.7rem;"></i></div>'
+          : '<div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center" style="width:28px;height:28px;font-size:.7rem;font-weight:bold;">' + escapeHtml(fmt.initials(name)) + '</div>';
         return '<tr>' +
-          '<td class="text-muted small">' + (ts ? fmt.datetime(ts) : '—') + '</td>' +
-          '<td><div class="d-flex align-items-center gap-2">' + avatar + '<span class="fw-semibold">' + escapeHtml(name) + '</span></div></td>' +
-          '<td><span class="status-badge secondary">' + escapeHtml(category || '—') + '</span></td>' +
-          '<td>' + escapeHtml(r.action || r.description || '—') + '</td>' +
-          '<td>' + statusBadge(r.action || 'INFO') + '</td>' +
+          '<td class="text-muted small text-nowrap">' + (ts ? fmt.datetime(ts) : '—') + '</td>' +
+          '<td><div class="d-flex align-items-center gap-2">' + avatar +
+            '<div><div class="fw-semibold">' + escapeHtml(name) + '</div>' +
+            (r.device_name ? '<div class="small text-muted">' + escapeHtml(r.device_name) + '</div>' : '') +
+          '</div></div></td>' +
+          '<td>' + statusBadge(category) + '</td>' +
+          '<td><div>' + escapeHtml(desc) + '</div>' +
+            (r.action && r.description ? '<div class="small text-muted">' + escapeHtml(humanAction(r.action)) + '</div>' : '') +
+          '</td>' +
+          '<td>' + statusBadge(actionStatus(r.action)) + '</td>' +
         '</tr>';
       }).join('');
     }
@@ -1420,95 +1829,161 @@
      19. PAGE: devices
      ============================================================ */
   register('devices', function () {
-    var state = { page: 1, pageSize: 20, search: '', type: '' };
+    var state = { search: '', type: '', status: '', rows: [], selectedId: null };
+    var pollTimer = null;
 
-    function loadDevices() {
-      var tbody = el('devTableBody');
-      if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Loading devices…</td></tr>';
-      Api.get('/devices/', {
-        query: {
-          page: state.page, page_size: state.pageSize,
-          search: state.search || undefined,
-          device_type: state.type || undefined,
-        },
-      }).then(function (data) {
-        var rows = toArray(data);
-        var total = pagedCount(data);
-        renderTable(rows);
-        renderPagination(total);
-        updateSummary(rows, total);
-      }).catch(function (err) { console.error('[devices] load failed:', err); setError('devTableBody', 'Could not load devices'); });
+    function flowTxt(v) {
+      return v == null || isNaN(v) ? '—' : fmt.num(v, 2) + ' L/min';
     }
 
-    function updateSummary(rows, total) {
-      var connected = rows.filter(function (d) { return d.connection_status === 'CONNECTED'; }).length;
-      setText('devTotal', fmt.int(total));
-      setText('devTotalNote', 'registered');
-      setText('devConnected', fmt.int(connected));
-      setText('devConnectedNote', 'online now');
-      var latest = rows.reduce(function (acc, d) {
-        if (!d.last_communication) return acc;
-        return (!acc || new Date(d.last_communication) > new Date(acc)) ? d.last_communication : acc;
-      }, null);
+    function loadDevices(keepSelection) {
+      var tbody = el('devTableBody');
+      if (tbody && !keepSelection) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Loading devices…</td></tr>';
+      }
+      Api.get('/devices/', {
+        query: {
+          search: state.search || undefined,
+          device_type: state.type || undefined,
+          effective_status: state.status || undefined,
+        },
+      }).then(function (data) {
+        var rows = (data && data.devices) || toArray(data);
+        var summary = (data && data.summary) || {};
+        state.rows = rows;
+        updateSummary(summary, rows);
+        renderTable(rows);
+        setText('devPageInfo', rows.length + ' device' + (rows.length !== 1 ? 's' : '') +
+          ' · heartbeat timeout ' + (summary.heartbeat_timeout_seconds || 120) + 's');
+        var sel = state.selectedId
+          ? rows.find(function (r) { return r.id === state.selectedId; })
+          : rows[0];
+        if (sel) {
+          state.selectedId = sel.id;
+          renderDetail(sel);
+        }
+      }).catch(function (err) {
+        console.error('[devices] load failed:', err);
+        setError('devTableBody', 'Could not load devices');
+      });
+    }
+
+    function updateSummary(summary, rows) {
+      setText('devTotal', fmt.int(summary.total != null ? summary.total : rows.length));
+      setText('devTotalNote', (summary.offline != null ? summary.offline : 0) + ' offline');
+      setText('devConnected', fmt.int(summary.connected != null ? summary.connected : 0));
+      setText('devConnectedNote', 'within heartbeat window');
+      var latest = summary.last_communication;
       setText('devLastComm', latest ? fmt.timeAgo(latest) : '—');
-      setText('devLastCommNote', latest ? new Date(latest).toLocaleString() : 'No data');
-      setText('devWarnings', '—');
-      setText('devWarningsNote', 'Warnings via notifications');
+      setText('devLastCommNote', latest ? new Date(latest).toLocaleString() : 'No telemetry yet');
+      var warn = summary.hardware_warnings != null ? summary.hardware_warnings : 0;
+      setText('devWarnings', fmt.int(warn));
+      setText('devWarningsNote', warn ? 'Open hardware / disconnect alerts' : 'No open hardware alerts');
     }
 
     function renderTable(rows) {
       var tbody = el('devTableBody'); if (!tbody) return;
       if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">No devices</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">No devices registered</td></tr>';
         return;
       }
       tbody.innerHTML = rows.map(function (d) {
-        var health = d.connection_status === 'CONNECTED' ? 'HEALTHY' : 'OFFLINE';
-        return '<tr>' +
-          '<td class="fw-semibold">' + escapeHtml(d.device_name) + '</td>' +
-          '<td><code>' + escapeHtml(d.device_identifier) + '</code></td>' +
-          '<td>' + escapeHtml(d.device_type || '—') + '</td>' +
-          '<td>' + statusBadge(d.connection_status) + '</td>' +
-          '<td>' + statusBadge(health) + '</td>' +
-          '<td class="text-muted small">' + fmt.timeAgo(d.last_communication) + '</td>' +
-          '<td><button class="btn btn-sm btn-outline-primary" data-action="view" data-id="' + d.id + '">View</button></td>' +
+        var active = state.selectedId === d.id ? ' table-active' : '';
+        return '<tr class="' + active + '" data-id="' + d.id + '" style="cursor:pointer;">' +
+          '<td><div class="fw-semibold">' + escapeHtml(d.device_name) + '</div>' +
+            '<div class="small text-muted"><code>' + escapeHtml(d.device_identifier) + '</code>' +
+            (d.location ? ' · ' + escapeHtml(d.location) : '') + '</div></td>' +
+          '<td>' + statusBadge(d.connection_status) +
+            '<div class="small text-muted">' + escapeHtml(d.device_type || '—') + '</div></td>' +
+          '<td class="small">S1 ' + flowTxt(d.inlet_flow_lpm) +
+            '<br>S2 ' + flowTxt(d.outlet_flow_lpm) + '</td>' +
+          '<td>' + (d.valve_state ? statusBadge(d.valve_state) : '<span class="text-muted">—</span>') + '</td>' +
+          '<td>' + statusBadge(d.health) +
+            '<div class="small text-muted">' + escapeHtml(d.health_note || '') + '</div></td>' +
+          '<td class="text-muted small">' + fmt.timeAgo(d.last_communication) +
+            (d.heartbeat_age_seconds != null ? '<div>' + d.heartbeat_age_seconds + 's ago</div>' : '') +
+          '</td>' +
+          '<td><button class="btn btn-sm btn-outline-primary" data-action="view" data-id="' + d.id + '">Details</button></td>' +
         '</tr>';
       }).join('');
 
+      tbody.querySelectorAll('tr[data-id]').forEach(function (tr) {
+        tr.addEventListener('click', function (e) {
+          if (e.target.closest('button')) return;
+          selectDevice(Number(tr.getAttribute('data-id')));
+        });
+      });
       tbody.querySelectorAll('[data-action="view"]').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          var id = btn.getAttribute('data-id');
-          Api.get('/devices/' + id + '/health/').then(function (h) {
-            toast.info(JSON.stringify(h));
-          }).catch(function () { toast.error('Could not load health'); });
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          selectDevice(Number(btn.getAttribute('data-id')));
         });
       });
     }
 
-    function renderPagination(total) {
-      var info = el('devPageInfo'), pag = el('devPagination'); if (!info || !pag) return;
-      var pages = Math.max(1, Math.ceil(total / state.pageSize));
-      var from = total === 0 ? 0 : (state.page - 1) * state.pageSize + 1;
-      var to = Math.min(state.page * state.pageSize, total);
-      info.textContent = 'Showing ' + from + ' to ' + to + ' of ' + total;
-      var html = '<li class="page-item ' + (state.page === 1 ? 'disabled' : '') + '"><a class="page-link" href="#" data-page="' + (state.page - 1) + '">Previous</a></li>';
-      for (var p = 1; p <= pages; p++) {
-        html += '<li class="page-item ' + (p === state.page ? 'active' : '') + '"><a class="page-link" href="#" data-page="' + p + '">' + p + '</a></li>';
+    function selectDevice(id) {
+      state.selectedId = id;
+      var row = state.rows.find(function (r) { return r.id === id; });
+      if (row) {
+        renderTable(state.rows);
+        renderDetail(row);
       }
-      html += '<li class="page-item ' + (state.page === pages ? 'disabled' : '') + '"><a class="page-link" href="#" data-page="' + (state.page + 1) + '">Next</a></li>';
-      pag.innerHTML = html;
-      pag.querySelectorAll('[data-page]').forEach(function (a) {
-        a.addEventListener('click', function (e) {
-          e.preventDefault();
-          var p = Number(a.getAttribute('data-page'));
-          if (!p || p === state.page || p < 1 || p > pages) return;
-          state.page = p; loadDevices();
-        });
-      });
+      Api.get('/devices/' + id + '/health/').then(function (h) {
+        if (state.selectedId !== id) return;
+        renderDetail(h);
+      }).catch(function () {});
+    }
+
+    function renderDetail(d) {
+      var box = el('devDetailBody'); if (!box) return;
+      var sensors = d.sensors || [];
+      var valves = d.valves || [];
+      var sensorHtml = sensors.length
+        ? sensors.map(function (s) {
+            return '<tr><td>' + escapeHtml(s.sensor_name) +
+              ' <span class="text-muted">(' + escapeHtml(s.sensor_position) + ')</span></td>' +
+              '<td>' + statusBadge(s.status) + '</td>' +
+              '<td>' + flowTxt(s.flow_rate_lpm) + '</td>' +
+              '<td class="small text-muted">' +
+                (s.last_reading_at ? fmt.timeAgo(s.last_reading_at) : 'no reading') +
+              '</td></tr>';
+          }).join('')
+        : '<tr><td colspan="4" class="text-muted">No sensors linked</td></tr>';
+      var valveHtml = valves.length
+        ? valves.map(function (v) {
+            return '<div class="d-flex justify-content-between border-bottom py-2">' +
+              '<span>' + escapeHtml(v.valve_name) + '</span>' +
+              '<span>' + statusBadge(v.current_status) + ' · ' + escapeHtml(v.control_mode || '') + '</span></div>';
+          }).join('')
+        : '<div class="text-muted small">No valve linked</div>';
+
+      box.innerHTML =
+        '<div class="mb-3">' +
+          '<div class="fw-bold fs-5">' + escapeHtml(d.device_name || 'Device') + '</div>' +
+          '<code>' + escapeHtml(d.device_identifier || '') + '</code>' +
+        '</div>' +
+        '<dl class="row small mb-3">' +
+          '<dt class="col-5">Connection</dt><dd class="col-7">' + statusBadge(d.connection_status) + '</dd>' +
+          '<dt class="col-5">Health</dt><dd class="col-7">' + statusBadge(d.health) +
+            '<div class="text-muted">' + escapeHtml(d.health_note || '') + '</div></dd>' +
+          '<dt class="col-5">Location</dt><dd class="col-7">' + escapeHtml(d.location || '—') + '</dd>' +
+          '<dt class="col-5">Firmware</dt><dd class="col-7">' + escapeHtml(d.firmware_version || 'Not reported') + '</dd>' +
+          '<dt class="col-5">Type</dt><dd class="col-7">' + escapeHtml(d.device_type || '—') + '</dd>' +
+          '<dt class="col-5">Heartbeat</dt><dd class="col-7">' +
+            (d.heartbeat_age_seconds != null ? d.heartbeat_age_seconds + 's ago' : '—') +
+            ' <span class="text-muted">(timeout ' + (d.heartbeat_timeout_seconds || 120) + 's)</span></dd>' +
+          '<dt class="col-5">Last telemetry</dt><dd class="col-7">' +
+            (d.last_communication ? fmt.datetime(d.last_communication) : '—') + '</dd>' +
+          '<dt class="col-5">Active</dt><dd class="col-7">' + (d.is_active ? 'Yes' : 'No') + '</dd>' +
+        '</dl>' +
+        '<h6 class="fw-semibold">Sensors (' + sensors.length + ')</h6>' +
+        '<div class="table-responsive mb-3"><table class="table table-sm mb-0">' +
+          '<thead><tr><th>Name</th><th>Status</th><th>Flow</th><th>Reading</th></tr></thead>' +
+          '<tbody>' + sensorHtml + '</tbody></table></div>' +
+        '<h6 class="fw-semibold">Valves</h6>' + valveHtml;
     }
 
     function registerDevice() {
-      // Backend endpoint: POST /iot/devices/register/
       var form = el('registerDeviceForm'); if (!form) return;
       form.addEventListener('submit', function (e) {
         e.preventDefault();
@@ -1518,15 +1993,20 @@
           device_identifier: fd.get('device_id'),
           device_type: fd.get('device_type') || 'ARDUINO_ESP',
           location: fd.get('location') || '',
+          firmware_version: fd.get('firmware_version') || '',
         };
         var btn = el('registerDeviceSubmit'), txt = el('registerDeviceSubmitText'), sp = el('registerDeviceSpinner');
         btn.disabled = true; if (txt) txt.textContent = 'Registering…'; if (sp) sp.classList.remove('d-none');
 
         Api.post('/iot/devices/register/', payload).then(function (data) {
-          // Show api_key once — the user must copy it
           var modal = bootstrap.Modal.getInstance(el('registerDeviceModal'));
           if (modal) modal.hide();
-          alert('Device registered!\n\nAPI key (SAVE IT NOW, shown once):\n\n' + data.api_key);
+          var key = (data && data.api_key) || '';
+          toast.success('Device registered');
+          if (key) {
+            window.prompt('API key (copy & store securely — shown once):', key);
+          }
+          form.reset();
           loadDevices();
         }).catch(function (err) {
           toast.error(err.message || 'Registration failed');
@@ -1539,17 +2019,28 @@
     var s = el('devSearch');
     if (s) s.addEventListener('input', function (e) {
       clearTimeout(window._devTimer);
-      window._devTimer = setTimeout(function () { state.search = e.target.value.trim(); state.page = 1; loadDevices(); }, 350);
+      window._devTimer = setTimeout(function () {
+        state.search = e.target.value.trim();
+        loadDevices();
+      }, 350);
     });
     var t = el('devTypeFilter');
-    if (t) t.addEventListener('change', function (e) { state.type = e.target.value; state.page = 1; loadDevices(); });
+    if (t) t.addEventListener('change', function (e) { state.type = e.target.value; loadDevices(); });
+    var st = el('devStatusFilter');
+    if (st) st.addEventListener('change', function (e) { state.status = e.target.value; loadDevices(); });
     var rb = el('registerDeviceBtn');
     if (rb) rb.addEventListener('click', function () {
       new bootstrap.Modal(el('registerDeviceModal')).show();
     });
+    var rf = el('devRefreshBtn');
+    if (rf) rf.addEventListener('click', function () { loadDevices(true); });
 
     registerDevice();
     loadDevices();
+    pollTimer = setInterval(function () { loadDevices(true); }, 10000);
+    window.addEventListener('beforeunload', function () {
+      if (pollTimer) clearInterval(pollTimer);
+    });
   });
 
   /* ============================================================
@@ -1699,15 +2190,32 @@
      ============================================================ */
   register('valve-control', function () {
     var currentValve = null;
+    var pollTimer = null;
 
     function loadValves() {
       Api.get('/valves/').then(function (data) {
         var rows = toArray(data);
-        if (!rows.length) { toast.info('No valves configured'); return; }
+        if (!rows.length) {
+          toast.info('No valves configured');
+          setBadge('vc-conn-badge', 'NO DEVICE', 'secondary');
+          setText('vc-conn-note', 'Register a kit device first');
+          return;
+        }
         currentValve = rows[0];
         renderValve(currentValve);
+        enrichDevice(currentValve);
         loadActivities();
-      }).catch(function (err) { console.error('[valves] load failed:', err); });
+      }).catch(function (err) {
+        console.error('[valves] load failed:', err);
+        toast.error(err.message || 'Could not load valves');
+      });
+    }
+
+    function connVariant(status) {
+      var s = String(status || 'UNKNOWN').toUpperCase();
+      if (s === 'CONNECTED') return 'success';
+      if (s === 'DISCONNECTED') return 'danger';
+      return 'warning';
     }
 
     function renderValve(v) {
@@ -1718,9 +2226,12 @@
       setBadge('vc-mode-badge', v.control_mode || 'MANUAL', v.control_mode === 'AUTOMATIC' ? 'success' : 'secondary');
       setText('vc-mode-note', v.control_mode === 'AUTOMATIC' ? 'Rules-driven' : 'Operator-driven');
 
-      // Connection: derive from device if present
-      setBadge('vc-conn-badge', '—', 'secondary');
-      setText('vc-conn-note', 'Device info via /devices/' + (v.device || '—'));
+      var conn = v.connection_status || 'UNKNOWN';
+      setBadge('vc-conn-badge', conn, connVariant(conn));
+      setText('vc-conn-note',
+        (v.device_name || 'Device') +
+        (v.device_last_communication ? ' · last seen ' + fmt.timeAgo(v.device_last_communication) : ' · awaiting telemetry')
+      );
 
       var details = el('vcDetailsBody');
       if (details) {
@@ -1730,9 +2241,42 @@
             '<dt class="col-5">Identifier</dt><dd class="col-7"><code>' + escapeHtml(v.valve_identifier || '—') + '</code></dd>' +
             '<dt class="col-5">State</dt><dd class="col-7">' + statusBadge(v.current_status) + '</dd>' +
             '<dt class="col-5">Mode</dt><dd class="col-7">' + statusBadge(v.control_mode) + '</dd>' +
+            '<dt class="col-5">IoT device</dt><dd class="col-7">' + escapeHtml(v.device_name || '—') +
+              ' <code class="small">' + escapeHtml(v.device_identifier || '') + '</code></dd>' +
+            '<dt class="col-5">Connection</dt><dd class="col-7">' + statusBadge(conn) + '</dd>' +
+            '<dt class="col-5">Last telemetry</dt><dd class="col-7">' +
+              (v.device_last_communication ? fmt.datetime(v.device_last_communication) : '—') + '</dd>' +
+            '<dt class="col-5">Location</dt><dd class="col-7">' + escapeHtml(v.device_location || '—') + '</dd>' +
             '<dt class="col-5">Last update</dt><dd class="col-7">' + fmt.datetime(v.last_updated) + '</dd>' +
           '</dl>';
       }
+    }
+
+    function enrichDevice(v) {
+      if (!v || !v.device) return;
+      Api.get('/devices/' + v.device + '/').then(function (d) {
+        if (!currentValve || currentValve.id !== v.id) return;
+        currentValve.connection_status = d.connection_status || currentValve.connection_status;
+        currentValve.device_last_communication = d.last_communication || currentValve.device_last_communication;
+        currentValve.device_name = d.device_name || currentValve.device_name;
+        currentValve.device_identifier = d.device_identifier || currentValve.device_identifier;
+        currentValve.device_location = d.location || currentValve.device_location;
+        currentValve.device_is_active = d.is_active;
+        renderValve(currentValve);
+      }).catch(function () { /* keep serializer fields */ });
+
+      Api.get('/devices/' + v.device + '/health/').then(function (h) {
+        if (!h) return;
+        var healthy = !!h.healthy;
+        setBadge('vc-conn-badge',
+          healthy ? 'CONNECTED' : (h.connection_status || currentValve.connection_status || 'UNKNOWN'),
+          healthy ? 'success' : 'danger');
+        setText('vc-conn-note',
+          (currentValve.device_name || h.device || 'Kit') +
+          (healthy ? ' · IoT healthy' : ' · IoT degraded') +
+          (h.last_communication ? ' · ' + fmt.timeAgo(h.last_communication) : '')
+        );
+      }).catch(function () {});
     }
 
     function loadActivities() {
@@ -1741,9 +2285,18 @@
         var tbody = el('vcActivityBody'); if (!tbody) return;
         if (!rows.length) {
           tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">No valve activity</td></tr>';
+          setBadge('vc-cmd-badge', 'NONE', 'secondary');
+          setText('vc-cmd-note', 'No commands yet');
           return;
         }
         setText('vcActivityCount', rows.length + ' entries');
+        var latest = rows[0];
+        setBadge('vc-cmd-badge', latest.execution_status || latest.command_type || '—',
+          latest.execution_status === 'EXECUTED' ? 'success'
+            : latest.execution_status === 'FAILED' ? 'danger'
+            : latest.execution_status === 'PENDING' ? 'warning' : 'secondary');
+        setText('vc-cmd-note',
+          (latest.command_type || 'Command') + ' · ' + fmt.timeAgo(latest.requested_at));
         tbody.innerHTML = rows.slice(0, 20).map(function (r) {
           return '<tr>' +
             '<td class="text-muted small">' + fmt.datetime(r.requested_at) + '</td>' +
@@ -1761,8 +2314,9 @@
       Api.post(path, {}).then(function (cmd) {
         toast.success('Command submitted — waiting for hardware');
         setBadge('vc-cmd-badge', cmd.execution_status || 'PENDING', 'warning');
-        setText('vc-cmd-note', 'Issued ' + fmt.timeAgo(cmd.requested_at));
+        setText('vc-cmd-note', 'Issued ' + fmt.timeAgo(cmd.requested_at || new Date().toISOString()));
         loadActivities();
+        setTimeout(loadValves, 1500);
       }).catch(function (err) {
         toast.error(err.message || 'Command failed');
         setBadge('vc-cmd-badge', 'FAILED', 'danger');
@@ -1776,19 +2330,379 @@
     var rf = el('vcRefreshBtn'); if (rf) rf.addEventListener('click', loadValves);
 
     loadValves();
+    pollTimer = setInterval(loadValves, 10000);
+    window.addEventListener('beforeunload', function () {
+      if (pollTimer) clearInterval(pollTimer);
+    });
   });
 
   /* ============================================================
-     22. PAGE: water-usage (simple aggregate view)
+     22. PAGE: water-usage
      ============================================================ */
   register('water-usage', function () {
-    // Not present in main.js previously; a minimal view that reuses analytics
-    console.log('[water-usage] page loaded');
+    var hourlyChart = null, dailyChart = null, weeklyChart = null;
+
+    function ymd(d) {
+      var pad = function (n) { return String(n).padStart(2, '0'); };
+      return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    }
+    function themeColors() {
+      var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+      return { text: dark ? '#94a3b8' : '#5a6a85', grid: dark ? '#334155' : '#e5eaef', mode: dark ? 'dark' : 'light' };
+    }
+    function rangeFor(period) {
+      var end = new Date();
+      var start = new Date();
+      if (period === 'week') start.setDate(end.getDate() - 6);
+      else if (period === 'month') start.setDate(end.getDate() - 29);
+      else if (period === 'custom') {
+        var s = el('wuStartDate') && el('wuStartDate').value;
+        var e = el('wuEndDate') && el('wuEndDate').value;
+        return { start_date: s || ymd(start), end_date: e || ymd(end) };
+      } else {
+        start = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+      }
+      return { start_date: ymd(start), end_date: ymd(end) };
+    }
+
+    function renderBar(targetId, chartRefName, labels, values, title) {
+      var c = themeColors();
+      var options = {
+        chart: { type: 'bar', height: 300, toolbar: { show: false } },
+        series: [{ name: title || 'Consumption', data: values }],
+        xaxis: { categories: labels, labels: { style: { colors: c.text } } },
+        yaxis: { title: { text: 'L' }, labels: { style: { colors: c.text } } },
+        colors: ['#0ea5e9'],
+        plotOptions: { bar: { columnWidth: '55%', borderRadius: 4 } },
+        dataLabels: { enabled: false },
+        grid: { borderColor: c.grid },
+        theme: { mode: c.mode },
+        tooltip: { y: { formatter: function (v) { return Number(v).toFixed(1) + ' L'; } } },
+      };
+      var target = el(targetId);
+      if (!target) return;
+      if (chartRefName === 'hourly') {
+        if (hourlyChart) { hourlyChart.updateOptions(options); hourlyChart.updateSeries(options.series); }
+        else { hourlyChart = new ApexCharts(target, options); hourlyChart.render(); }
+      } else if (chartRefName === 'daily') {
+        if (dailyChart) { dailyChart.updateOptions(options); dailyChart.updateSeries(options.series); }
+        else { dailyChart = new ApexCharts(target, options); dailyChart.render(); }
+      } else {
+        if (weeklyChart) { weeklyChart.updateOptions(options); weeklyChart.updateSeries(options.series); }
+        else { weeklyChart = new ApexCharts(target, options); weeklyChart.render(); }
+      }
+    }
+
+    function loadKpis() {
+      var today = ymd(new Date());
+      var weekStart = new Date(); weekStart.setDate(weekStart.getDate() - 6);
+      var monthStart = new Date(); monthStart.setDate(monthStart.getDate() - 29);
+
+      Promise.all([
+        Api.get('/analytics/summary/', { query: { start_date: today, end_date: today } }),
+        Api.get('/analytics/summary/', { query: { start_date: ymd(weekStart), end_date: today } }),
+        Api.get('/analytics/summary/', { query: { start_date: ymd(monthStart), end_date: today } }),
+        Api.get('/analytics/consumption-trends/', { query: { start_date: ymd(monthStart), end_date: today } }),
+      ]).then(function (results) {
+        var d = results[0], w = results[1], m = results[2], trends = results[3];
+        setText('wu-today', fmt.num(d.total_consumption, 1));
+        setText('wu-today-note', 'Litres today');
+        setText('wu-week', fmt.num(w.total_consumption, 1));
+        setText('wu-week-note', 'Last 7 days');
+        setText('wu-month', fmt.num(m.total_consumption, 1));
+        setText('wu-month-note', 'Last 30 days');
+
+        trends = Array.isArray(trends) ? trends : toArray(trends);
+        if (trends.length) {
+          var maxIdx = 0;
+          for (var i = 1; i < trends.length; i++) {
+            if (Number(trends[i].consumption) > Number(trends[maxIdx].consumption)) maxIdx = i;
+          }
+          setBadge('wu-peak', String(trends[maxIdx].date || '—'), 'info');
+          setText('wu-peak-note', fmt.num(trends[maxIdx].consumption, 1) + ' L');
+        } else {
+          setBadge('wu-peak', '—', 'secondary');
+          setText('wu-peak-note', 'No peak data yet');
+        }
+      }).catch(function (err) {
+        console.error('[water-usage] kpi failed:', err);
+        setText('wu-today-note', 'Could not load');
+        setText('wu-week-note', 'Could not load');
+        setText('wu-month-note', 'Could not load');
+        setText('wu-peak-note', 'Could not load');
+        toast.error(err.message || 'Water usage KPIs failed');
+      });
+    }
+
+    function loadHourly() {
+      Api.get('/dashboard/flow-trend/', { query: { range: 'day' } }).then(function (payload) {
+        var points = (payload && payload.points) || (Array.isArray(payload) ? payload : []);
+        var buckets = {};
+        points.forEach(function (p) {
+          var ts = p.timestamp || '';
+          var hour = ts.slice(11, 13) || '00';
+          var key = hour + ':00';
+          // approximate litres from L/min over sample spacing (~1 min average)
+          buckets[key] = (buckets[key] || 0) + (Number(p.flow_rate) || 0);
+        });
+        var labels = Object.keys(buckets).sort();
+        var values = labels.map(function (k) { return Math.round(buckets[k] * 10) / 10; });
+        if (!labels.length) {
+          labels = ['00:00']; values = [0];
+        }
+        renderBar('wuHourlyChart', 'hourly', labels, values, 'Hourly flow volume');
+      }).catch(function (err) {
+        console.error('[water-usage] hourly failed:', err);
+        setError('wuHourlyChart', 'Could not load hourly consumption');
+      });
+    }
+
+    function loadDailyAndTable() {
+      var weekStart = new Date(); weekStart.setDate(weekStart.getDate() - 6);
+      var today = ymd(new Date());
+      Api.get('/analytics/consumption-trends/', {
+        query: { start_date: ymd(weekStart), end_date: today },
+      }).then(function (rows) {
+        rows = Array.isArray(rows) ? rows : toArray(rows);
+        var labels = rows.map(function (r) { return r.date; });
+        var values = rows.map(function (r) { return Number(r.consumption) || 0; });
+        renderBar('wuDailyChart', 'daily', labels.length ? labels : ['—'], values.length ? values : [0], 'Daily');
+        var tbody = el('wuTableBody');
+        if (tbody) {
+          if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-4">No consumption data yet</td></tr>';
+            setText('wu-table-count', '0 days');
+          } else {
+            setText('wu-table-count', rows.length + ' days');
+            tbody.innerHTML = rows.slice().reverse().map(function (r) {
+              return '<tr><td>' + escapeHtml(r.date) + '</td><td class="fw-semibold">' +
+                fmt.num(r.consumption, 1) + '</td><td>L</td></tr>';
+            }).join('');
+          }
+        }
+      }).catch(function (err) {
+        console.error('[water-usage] daily failed:', err);
+        setError('wuDailyChart', 'Could not load daily consumption');
+      });
+    }
+
+    function loadWeekly() {
+      var monthStart = new Date(); monthStart.setDate(monthStart.getDate() - 29);
+      var today = ymd(new Date());
+      Api.get('/analytics/consumption-trends/', {
+        query: { start_date: ymd(monthStart), end_date: today },
+      }).then(function (rows) {
+        rows = Array.isArray(rows) ? rows : toArray(rows);
+        // bucket into weeks
+        var weeks = {};
+        rows.forEach(function (r) {
+          var d = new Date(r.date + 'T00:00:00');
+          if (isNaN(d.getTime())) return;
+          var onejan = new Date(d.getFullYear(), 0, 1);
+          var week = Math.ceil((((d - onejan) / 86400000) + onejan.getDay() + 1) / 7);
+          var key = 'W' + week;
+          weeks[key] = (weeks[key] || 0) + (Number(r.consumption) || 0);
+        });
+        var labels = Object.keys(weeks);
+        var values = labels.map(function (k) { return Math.round(weeks[k] * 10) / 10; });
+        renderBar('wuWeeklyChart', 'weekly', labels.length ? labels : ['—'], values.length ? values : [0], 'Weekly');
+      }).catch(function (err) {
+        console.error('[water-usage] weekly failed:', err);
+        setError('wuWeeklyChart', 'Could not load weekly consumption');
+      });
+    }
+
+    function loadAll() {
+      loadKpis();
+      loadHourly();
+      loadDailyAndTable();
+      loadWeekly();
+    }
+
+    var period = el('wuPeriod');
+    if (period) period.addEventListener('change', function () {
+      var custom = period.value === 'custom';
+      if (el('wuStartDate')) el('wuStartDate').classList.toggle('d-none', !custom);
+      if (el('wuEndDate')) el('wuEndDate').classList.toggle('d-none', !custom);
+    });
+    var apply = el('wuApplyBtn');
+    if (apply) apply.addEventListener('click', loadAll);
+
+    loadAll();
+    setInterval(loadAll, 60000);
+  });
+
+  /* ============================================================
+     22b. PAGE: finance (private — staff/operator only)
+     ============================================================ */
+  register('finance', function () {
+    function money(v) {
+      if (v == null || isNaN(v)) return '—';
+      return Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function fillSettings(s) {
+      if (!s) return;
+      var sms = el('finSmsCost'); if (sms) sms.value = s.sms_cost;
+      var w = el('finWaterCost'); if (w) w.value = s.water_cost_per_liter;
+      var m = el('finMaintDefault'); if (m) m.value = s.maintenance_default_cost;
+      var k = el('finKitCost'); if (k) k.value = s.kit_unit_cost;
+      var a1 = el('finAutoSms'); if (a1) a1.checked = !!s.auto_record_sms;
+      var a2 = el('finAutoLeak'); if (a2) a2.checked = !!s.auto_record_leak_loss;
+    }
+
+    function render(data) {
+      var cur = data.currency || 'KES';
+      setText('fin-income', money(data.income));
+      setText('fin-expense', money(data.expense));
+      setText('fin-net', money(data.net));
+      setText('fin-auto', money(data.auto_expense));
+      setText('fin-manual', money(data.manual_expense));
+      ['fin-cur1', 'fin-cur2', 'fin-cur3'].forEach(function (id) { setText(id, cur); });
+
+      if (data.tips && data.tips.length) {
+        setText('finTips', data.tips.join(' '));
+      }
+
+      var cats = data.by_category || [];
+      var catEl = el('finCatList');
+      if (catEl) {
+        if (!cats.length) {
+          catEl.innerHTML = '<div class="text-muted">No expenses in this period.</div>';
+        } else {
+          catEl.innerHTML = cats.map(function (c) {
+            return '<div class="d-flex justify-content-between border-bottom py-2">' +
+              '<span>' + escapeHtml(c.category) + ' <span class="text-muted">(' + c.count + ')</span></span>' +
+              '<strong>' + money(c.total) + ' ' + cur + '</strong></div>';
+          }).join('');
+        }
+      }
+
+      var rows = data.recent || [];
+      setText('finLedgerCount', rows.length + ' recent');
+      var tbody = el('finLedgerBody');
+      if (!tbody) return;
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">No entries yet</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map(function (r) {
+        var canDel = r.source === 'MANUAL';
+        return '<tr>' +
+          '<td class="small text-muted">' + fmt.datetime(r.occurred_at) + '</td>' +
+          '<td>' + statusBadge(r.entry_type) + '</td>' +
+          '<td class="small">' + escapeHtml(r.category) + '</td>' +
+          '<td>' + escapeHtml(r.title) +
+            (r.notes ? '<div class="small text-muted">' + escapeHtml(r.notes).slice(0, 80) + '</div>' : '') +
+          '</td>' +
+          '<td class="fw-semibold">' + money(r.amount) + ' ' + escapeHtml(r.currency || cur) + '</td>' +
+          '<td>' + statusBadge(r.source) + '</td>' +
+          '<td>' + (canDel
+            ? '<button class="btn btn-sm btn-outline-danger fin-del" data-id="' + r.id + '">Delete</button>'
+            : '<span class="text-muted small">auto</span>') + '</td>' +
+        '</tr>';
+      }).join('');
+
+      tbody.querySelectorAll('.fin-del').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var id = btn.getAttribute('data-id');
+          Api.del('/finance/entries/' + id + '/').then(function () {
+            toast.success('Entry deleted');
+            load();
+          }).catch(function (err) { toast.error(err.message || 'Delete failed'); });
+        });
+      });
+
+      fillSettings(data.settings);
+    }
+
+    function load() {
+      var days = (el('finPeriod') && el('finPeriod').value) || 30;
+      Api.get('/finance/summary/', { query: { days: days } }).then(render).catch(function (err) {
+        toast.error(err.message || 'Finance load failed (staff/operator only)');
+        setHtml('finLedgerBody', '<tr><td colspan="7" class="text-center text-danger py-4">' +
+          escapeHtml(err.message || 'Access denied') + '</td></tr>');
+      });
+    }
+
+    var rf = el('finRefreshBtn'); if (rf) rf.addEventListener('click', load);
+    var per = el('finPeriod'); if (per) per.addEventListener('change', load);
+
+    var mb = el('finMaintBtn');
+    if (mb) mb.addEventListener('click', function () {
+      var title = (el('finMaintTitle') && el('finMaintTitle').value || '').trim();
+      if (!title) { toast.warn('Enter a maintenance title'); return; }
+      var amount = el('finMaintAmount') && el('finMaintAmount').value;
+      var body = {
+        title: title,
+        notes: (el('finMaintNotes') && el('finMaintNotes').value) || '',
+      };
+      if (amount !== '' && amount != null) body.amount = amount;
+      Api.post('/finance/maintenance/', body).then(function () {
+        toast.success('Maintenance logged');
+        if (el('finMaintTitle')) el('finMaintTitle').value = '';
+        if (el('finMaintAmount')) el('finMaintAmount').value = '';
+        if (el('finMaintNotes')) el('finMaintNotes').value = '';
+        load();
+      }).catch(function (err) { toast.error(err.message || 'Failed'); });
+    });
+
+    var eb = el('finEntryBtn');
+    if (eb) eb.addEventListener('click', function () {
+      var title = (el('finEntryTitle') && el('finEntryTitle').value || '').trim();
+      var amount = el('finEntryAmount') && el('finEntryAmount').value;
+      if (!title || !amount) { toast.warn('Title and amount required'); return; }
+      Api.post('/finance/entries/', {
+        entry_type: el('finEntryType').value,
+        category: el('finEntryCat').value,
+        title: title,
+        amount: amount,
+      }).then(function () {
+        toast.success('Entry added');
+        el('finEntryTitle').value = '';
+        el('finEntryAmount').value = '';
+        load();
+      }).catch(function (err) { toast.error(err.message || 'Failed'); });
+    });
+
+    var ss = el('finSaveSettings');
+    if (ss) ss.addEventListener('click', function () {
+      Api.patch('/finance/settings/', {
+        sms_cost: el('finSmsCost').value,
+        water_cost_per_liter: el('finWaterCost').value,
+        maintenance_default_cost: el('finMaintDefault').value,
+        kit_unit_cost: el('finKitCost').value,
+        auto_record_sms: !!(el('finAutoSms') && el('finAutoSms').checked),
+        auto_record_leak_loss: !!(el('finAutoLeak') && el('finAutoLeak').checked),
+      }).then(function () {
+        toast.success('Rates saved');
+        load();
+      }).catch(function (err) { toast.error(err.message || 'Save failed'); });
+    });
+
+    load();
   });
 
   /* ============================================================
      23. BOOTSTRAP
      ============================================================ */
+  function loadMsingiWidget() {
+    if (window.__MSINGI_BOOTSTRAPPED__) return;
+    // Keep finance page private — no public chatbot surface here
+    if (currentPage() === 'finance') return;
+    // App shell: mark body so contact FABs stay off the operator UI
+    if (!IS_PUBLIC_PAGE) document.body.classList.add('ap-app-shell');
+    var current = document.querySelector('script[src*="main.js"]');
+    var src = 'js/msingi-widget.js';
+    if (current && current.src) {
+      src = current.src.replace(/main\.js[^/]*$/i, 'msingi-widget.js');
+    }
+    var s = document.createElement('script');
+    s.src = src + (src.indexOf('?') >= 0 ? '&' : '?') + 'v=1';
+    s.defer = true;
+    document.body.appendChild(s);
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
     initTheme();
     initShell();
@@ -1801,6 +2715,8 @@
     } else {
       console.warn('[main.js] no controller registered for page:', page);
     }
+
+    loadMsingiWidget();
   });
 
   /* ============================================================

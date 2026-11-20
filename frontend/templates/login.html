@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -31,7 +31,7 @@
         <div class="container">
             <nav class="navbar navbar-light py-3">
                 <a href="index.html" class="navbar-brand p-0">
-                    <h1 class="text-primary m-0"><i class="fas fa-hand-holding-water text-primary me-3"></i>Cue</h1>
+                    <h1 class="text-primary m-0"><i class="fas fa-hand-holding-water text-primary me-3"></i>CUE</h1>
                 </a>
                 <a href="index.html" class="btn btn-outline-primary rounded-pill px-4">
                     <i class="fas fa-arrow-left me-2"></i>Back to Home
@@ -57,24 +57,27 @@
             <div class="col-lg-6 p-4 p-md-5 d-flex flex-column justify-content-center">
                 <div class="mb-4">
                     <h4 class="text-primary text-uppercase mb-1">Welcome Back</h4>
-                    <h2 class="mb-0">Login to Dashboard</h2>
+                    <h2 class="mb-0">Login to CUE Dashboard</h2>
+                    <p class="text-muted small mb-0 mt-2">Operator access only. Use your CUE username. After a successful sign-in you are taken to the secure dashboard.</p>
                 </div>
 
-                <form id="loginForm">
+                <div id="loginError" class="alert alert-danger d-none small py-2" role="alert"></div>
+
+                <form id="loginForm" novalidate>
                     <div class="mb-3">
-                        <label for="loginEmail" class="form-label fw-semibold">Email Address</label>
+                        <label for="username" class="form-label fw-semibold">Username</label>
                         <div class="input-group">
-                            <span class="input-group-text bg-light border-end-0"><i class="fas fa-envelope text-primary"></i></span>
-                            <input type="email" class="form-control bg-light border-start-0 py-3" id="loginEmail" placeholder="name@company.com" required>
+                            <span class="input-group-text bg-light border-end-0"><i class="fas fa-user text-primary"></i></span>
+                            <input type="text" class="form-control bg-light border-start-0 py-3" id="username" name="username" autocomplete="username" placeholder="Your username" required autofocus>
                         </div>
                     </div>
 
                     <div class="mb-3">
-                        <label for="loginPassword" class="form-label fw-semibold">Password</label>
+                        <label for="password" class="form-label fw-semibold">Password</label>
                         <div class="input-group">
                             <span class="input-group-text bg-light border-end-0"><i class="fas fa-lock text-primary"></i></span>
-                            <input type="password" class="form-control bg-light border-start-0 border-end-0 py-3" id="loginPassword" placeholder="Enter your password" required>
-                            <button class="btn btn-light border border-start-0 px-3 toggle-password-btn" type="button" data-target="loginPassword" aria-label="Toggle password visibility">
+                            <input type="password" class="form-control bg-light border-start-0 border-end-0 py-3" id="password" name="password" autocomplete="current-password" placeholder="Enter your password" required>
+                            <button class="btn btn-light border border-start-0 px-3 toggle-password-btn" type="button" data-target="password" aria-label="Toggle password visibility">
                                 <i class="fas fa-eye text-muted"></i>
                             </button>
                         </div>
@@ -90,16 +93,8 @@
 
                     <button type="submit" class="btn btn-primary rounded-pill w-100 py-3 mb-3">Login</button>
 
-                    <div class="text-center text-muted my-2"><small>OR</small></div>
-
-                    <button type="button" id="googleLoginBtn" class="btn btn-outline-primary rounded-pill w-100 py-3 mb-4 d-flex align-items-center justify-content-center gap-2">
-                        <i class="fab fa-google"></i>
-                        <span>Continue with Google</span>
-                    </button>
-
                     <p class="text-center mb-0">
-                        Don't have an account?
-                        <a href="register.html" class="text-primary fw-bold">Register here</a>
+                        <a href="index.html" class="text-primary fw-semibold"><i class="fas fa-arrow-left me-1"></i>Back to landing</a>
                     </p>
                 </form>
             </div>

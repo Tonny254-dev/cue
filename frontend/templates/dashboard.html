@@ -3,12 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Dashboard  AquaPulse</title>
+  <title>Dashboard  CUE</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
-  <link rel="stylesheet" href="css/aquapulse.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"/>
+  <link rel="stylesheet" href="css/cue.css">
 </head>
-<body>
+<body data-page="dashboard">
 
   <div class="ap-app" id="ap-app">
     <div class="ap-backdrop" id="ap-backdrop"></div>
@@ -16,7 +17,7 @@
     <!-- SIDEBAR -->
     <aside class="ap-sidebar" id="ap-sidebar">
       <a href="dashboard.html" class="ap-brand">
-        <i class="bi bi-droplet-fill"></i><span>AquaPulse</span>
+        <i class="fas fa-hand-holding-water"></i><span>CUE</span>
       </a>
 
       <nav class="flex-grow-1 overflow-auto">
@@ -30,13 +31,13 @@
 
         <div class="ap-nav-section mt-3">Management</div>
         <a href="devices.html" class="ap-nav-item"><i class="bi bi-cpu"></i><span>Devices & Sensors</span></a>
+        <a href="finance.html" class="ap-nav-item"><i class="bi bi-cash-stack"></i><span>Finance</span></a>
         <a href="notifications.html" class="ap-nav-item"><i class="bi bi-bell"></i><span>Notifications</span></a>
         <a href="user-management.html" class="ap-nav-item"><i class="bi bi-people"></i><span>User Management</span></a>
         <a href="activity-logs.html" class="ap-nav-item"><i class="bi bi-clock-history"></i><span>Activity Logs</span></a>
 
         <div class="ap-nav-section mt-3">Configuration</div>
         <a href="settings.html" class="ap-nav-item"><i class="bi bi-gear"></i><span>System Settings</span></a>
-        <a href="profile.html" class="ap-nav-item"><i class="bi bi-person"></i><span>Profile Settings</span></a>
         <a href="../login.html" class="ap-nav-item text-danger" id="logoutBtn">
           <i class="bi bi-box-arrow-right"></i><span>Logout</span>
         </a>
@@ -76,7 +77,6 @@
               <span id="topbarUserName" class="d-none d-md-block fw-semibold text-main">—</span>
             </button>
             <ul class="dropdown-menu dropdown-menu-end shadow">
-              <li><a class="dropdown-item" href="profile.html"><i class="bi bi-person me-2"></i>Profile</a></li>
               <li><a class="dropdown-item" href="settings.html"><i class="bi bi-gear me-2"></i>Settings</a></li>
               <li><hr class="dropdown-divider"></li>
               <li><a class="dropdown-item text-danger" href="../login.html" id="logoutDropdown">
@@ -146,9 +146,17 @@
         <div class="row g-4 mb-4">
           <div class="col-lg-8">
             <div class="ap-card h-100">
-              <div class="ap-card-header">
-                <h3 class="ap-card-title">Water Flow Trend</h3>
-                <span class="small text-muted" id="flowTrendRange">—</span>
+              <div class="ap-card-header flex-wrap gap-2">
+                <h3 class="ap-card-title mb-0">Water Flow Trend</h3>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                  <div class="btn-group btn-group-sm" role="group" aria-label="Flow trend range" id="flowTrendRangeBtns">
+                    <button type="button" class="btn btn-outline-primary active" data-flow-range="live">Live</button>
+                    <button type="button" class="btn btn-outline-primary" data-flow-range="day">Day</button>
+                    <button type="button" class="btn btn-outline-primary" data-flow-range="week">Week</button>
+                    <button type="button" class="btn btn-outline-primary" data-flow-range="month">Month</button>
+                  </div>
+                  <span class="small text-muted" id="flowTrendRange">—</span>
+                </div>
               </div>
               <div class="ap-card-body">
                 <div id="flowChart"></div>
@@ -210,6 +218,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.2/dist/apexcharts.min.js"></script>
-  <script src="../js/main.js"></script>
+  <script src="js/main.js?v=live4"></script>
 </body>
 </html>

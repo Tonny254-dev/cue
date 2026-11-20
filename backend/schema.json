@@ -1,7 +1,7 @@
 {
     "openapi": "3.0.3",
     "info": {
-        "title": "MAWASCO Water Monitoring API",
+        "title": "CUE Water Monitoring API",
         "version": "1.0.0",
         "description": "IoT water monitoring, leak detection and valve control backend."
     },
