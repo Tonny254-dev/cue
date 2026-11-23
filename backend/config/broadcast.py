@@ -1,12 +1,28 @@
+import logging
+import threading
+
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
+log = logging.getLogger(__name__)
+
+
 def _send(group: str, event: str, payload: dict):
+    """Fire-and-forget so IoT ingest is not blocked on WebSocket fanout."""
     layer = get_channel_layer()
     if layer is None:
         return
-    async_to_sync(layer.group_send)(group, {"type": "broadcast.event",
-                                             "event": event, "payload": payload})
+
+    def _do():
+        try:
+            async_to_sync(layer.group_send)(
+                group,
+                {"type": "broadcast.event", "event": event, "payload": payload},
+            )
+        except Exception:
+            log.debug("broadcast to %s failed", group, exc_info=True)
+
+    threading.Thread(target=_do, name=f"ws-{group}", daemon=True).start()
 
 def broadcast_flow_reading(reading):
     payload = {

@@ -61,8 +61,26 @@ def compare_pipeline(pipeline: Pipeline, window_seconds: int = 30) -> dict:
     flow_threshold = Decimal(settings.leak_trigger_flow_difference)
     pct_threshold = Decimal(settings.leak_trigger_percentage)
 
+    # Fluid-aware arm threshold: pipeline profile wins, else system setting.
+    from monitoring.fluids import get_fluid_profile
+
+    profile = get_fluid_profile(getattr(pipeline, "fluid_type", None))
+    arm = Decimal(getattr(settings, "min_flow_arm_lpm", None) or profile.min_flow_arm_lpm)
+    # Prefer the stricter (higher) of profile vs global so viscous fluids stay safe.
+    if profile.min_flow_arm_lpm > arm:
+        arm = profile.min_flow_arm_lpm
+    noise = Decimal(getattr(settings, "flow_noise_lpm", None) or profile.flow_noise_lpm)
+    if profile.flow_noise_lpm > noise:
+        noise = profile.flow_noise_lpm
+
     # Arm only when there is meaningful inlet flow (avoid dry-pipe noise)
-    armed = inlet_flow >= Decimal("2.0")
+    armed = inlet_flow >= arm
+    # Collapse near-noise readings so dry chatter never looks like a leak.
+    if inlet_flow < noise:
+        inlet_flow = Decimal("0")
+        difference = inlet_flow - outlet_flow
+        pct = Decimal("0")
+        armed = False
     is_leak = bool(
         armed
         and abs(difference) > tolerance
@@ -78,11 +96,18 @@ def compare_pipeline(pipeline: Pipeline, window_seconds: int = 30) -> dict:
         "flow_difference": difference,
         "difference_percentage": pct,
         "is_leak_candidate": is_leak,
+        "fluid_type": profile.code,
+        "viscosity_class": profile.viscosity_class,
         "settings": {
             "tolerance": tolerance,
             "flow_threshold": flow_threshold,
             "pct_threshold": pct_threshold,
             "duration": settings.leak_detection_duration,
+            "min_flow_arm_lpm": arm,
+            "flow_noise_lpm": noise,
+            "k_factor": profile.k_factor,
+            "sensor_compatible": profile.compatible_with_yf_s201
+            or (getattr(pipeline, "sensor_class", "") or "").upper() not in ("", "YF-S201"),
         },
     }
 

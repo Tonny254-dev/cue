@@ -2,16 +2,17 @@
 #include <math.h>
 
 // Pins
-const int sensor1Pin = 2;     // Inlet S1
-const int sensor2Pin = 3;     // Outlet S2
+const int sensor1Pin = 2;     // Inlet S1 signal (interrupt)
+const int sensor2Pin = 3;     // Outlet S2 signal (interrupt)
 const int relayPin = 4;
-const int sensor2Power = 11;
+const int sensor1Power = 10;  // 5V enable for S1 (YF-S201 red)
+const int sensor2Power = 11;  // 5V enable for S2
 const int relayPower = 12;
 
 // YF-S201: L/min = pulse_Hz / 7.5. Volume from pulses only (not from smoothed L/min).
 const float PULSES_PER_LITRE_PER_SEC = 7.5;  // Hz per (L/min)
 const float ML_PER_PULSE = 1000.0 / (7.5 * 60.0);  // ≈ 2.222 mL per pulse
-const int MIN_PULSES_FOR_FLOW = 2;  // ignore 1-pulse chatter
+const int MIN_PULSES_FOR_FLOW = 1;  // count even a single pulse in the 1s window
 
 // ---- Pattern learning (S1 vs S2) — measured flow only ----
 const float FLOW_NOISE_LPM = 0.40;   // dry-pipe chatter → report 0
@@ -23,9 +24,10 @@ const int MIN_LEARN_SAMPLES = 20;
 const float LEARN_CAP_LPM = 2.5;
 const float BIAS_LEARN_ALPHA = 0.04;
 const float VAR_LEARN_ALPHA = 0.05;
-const float FLOW_EMA_ALPHA = 0.35;
+const float FLOW_EMA_ALPHA = 0.85;  // leak-model smoother; live UI uses instant rate
 const float Z_TRIP = 2.5;
 const float PIPE_LENGTH_M = 50.0;  // set to real S1→S2 length
+const unsigned long SAMPLE_MS = 250;  // 4 Hz telemetry for snappy live UI
 
 volatile unsigned int pulseCount1 = 0;
 volatile unsigned int pulseCount2 = 0;
@@ -163,33 +165,39 @@ void pollSerialCommands() {
 void setup() {
   Serial.begin(9600);
 
+  pinMode(sensor1Power, OUTPUT);
+  digitalWrite(sensor1Power, HIGH);
   pinMode(sensor2Power, OUTPUT);
   digitalWrite(sensor2Power, HIGH);
   pinMode(relayPower, OUTPUT);
   digitalWrite(relayPower, HIGH);
 
+  // YF-S201 / clones: open-collector signal. Prefer external sensor pull-up;
+  // ENABLE internal pull-up as backup so floating lines still edge-detect.
   pinMode(sensor1Pin, INPUT_PULLUP);
   pinMode(sensor2Pin, INPUT_PULLUP);
   pinMode(relayPin, OUTPUT);
   digitalWrite(relayPin, HIGH);
 
+  // FALLING = one count per rotor tooth (CHANGE inflated L/min ~2x on many clones).
   attachInterrupt(digitalPinToInterrupt(sensor1Pin), pulseCounter1, FALLING);
   attachInterrupt(digitalPinToInterrupt(sensor2Pin), pulseCounter2, FALLING);
 
+  Serial.println("CUE firmware: D2/D3 FALLING, 250ms sample, S2 power D11");
   openValveAndMonitor();
 }
 
 void loop() {
   pollSerialCommands();
 
-  if ((millis() - oldTime) < 1000 || systemLocked) {
+  if ((millis() - oldTime) < SAMPLE_MS || systemLocked) {
     return;
   }
 
-  // Exact 1s window from pulse counts → L/min (no mL conversion).
+  // Short window from pulse counts → L/min (scaled by elapsedSec).
   unsigned long now = millis();
   float elapsedSec = (now - oldTime) / 1000.0;
-  if (elapsedSec < 0.5) {
+  if (elapsedSec < 0.12) {
     return;
   }
 
@@ -282,11 +290,17 @@ void loop() {
     if (balancePct < 0.0) balancePct = 0.0;
   }
 
+  // Live telemetry uses instantaneous window rate (not EMA) so the UI feels instant.
+  float show1 = flowRate1;
+  float show2 = flowRate2;
+  if (show1 < FLOW_NOISE_LPM) show1 = 0.0;
+  if (show2 < FLOW_NOISE_LPM) show2 = 0.0;
+
   // Telemetry: L/min + pulse-true dV in mL (backend must use dV, not L/min integrate).
   Serial.print("Inlet (S1): ");
-  Serial.print(smooth1, 2);
+  Serial.print(show1, 2);
   Serial.print(" L/min  |  Outlet (S2): ");
-  Serial.print(smooth2, 2);
+  Serial.print(show2, 2);
   Serial.print(" L/min  |  dV_in:");
   Serial.print(dMl1, 1);
   Serial.print("mL dV_out:");
@@ -295,6 +309,10 @@ void loop() {
   Serial.print(p1);
   Serial.print("/");
   Serial.print(p2);
+  Serial.print(" pins:D2=");
+  Serial.print(digitalRead(sensor1Pin));
+  Serial.print(" D3=");
+  Serial.print(digitalRead(sensor2Pin));
   Serial.print(" | exp: ");
   Serial.print(expectedOut, 2);
   Serial.print("  bias: ");

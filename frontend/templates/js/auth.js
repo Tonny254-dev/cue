@@ -5,7 +5,11 @@
 (function () {
   'use strict';
 
-  var API_BASE    = 'http://localhost:8000/api/v1';
+  var API_BASE = (function () {
+    var host = location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:8000/api/v1';
+    return location.origin.replace(/\/$/, '') + '/api/v1';
+  })();
   var TOKEN_KEY   = 'ap_access';
   var REFRESH_KEY = 'ap_refresh';
   var USER_KEY    = 'ap_user';

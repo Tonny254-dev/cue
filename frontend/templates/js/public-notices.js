@@ -4,8 +4,11 @@
   if (window.__CUE_PUBLIC_NOTICES__) return;
   window.__CUE_PUBLIC_NOTICES__ = true;
 
-  var API = (window.AP && window.AP.CONFIG && window.AP.CONFIG.API_BASE)
-    || 'http://localhost:8000/api/v1';
+  var API = (window.AP && window.AP.CONFIG && window.AP.CONFIG.API_BASE) || (function () {
+    var host = location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:8000/api/v1';
+    return location.origin.replace(/\/$/, '') + '/api/v1';
+  })();
   var DISMISS_KEY = 'cue_notice_dismissed';
   var IS_NOTICES_PAGE = /(^|\/)notices\.html?$/i.test(location.pathname);
 

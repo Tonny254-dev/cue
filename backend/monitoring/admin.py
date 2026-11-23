@@ -4,8 +4,17 @@ from .models import Pipeline, Sensor, PipelineSection, FlowReading, Consumption
 
 @admin.register(Pipeline)
 class PipelineAdmin(admin.ModelAdmin):
-    list_display = ("id", "pipeline_name", "pipeline_code", "status", "length_meters")
-    list_filter = ("status",)
+    list_display = (
+        "id",
+        "pipeline_name",
+        "pipeline_code",
+        "fluid_type",
+        "viscosity_class",
+        "sensor_class",
+        "status",
+        "length_meters",
+    )
+    list_filter = ("status", "fluid_type", "viscosity_class")
     search_fields = ("pipeline_name", "pipeline_code")
 
 

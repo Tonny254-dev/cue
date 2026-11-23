@@ -8,7 +8,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-insecure-key")
 DEBUG = os.getenv("DEBUG", "True") == "True"
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+
+_raw_hosts = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1")
+ALLOWED_HOSTS = [h.strip() for h in _raw_hosts.split(",") if h.strip()]
+# Render sets this automatically
+_render_host = os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip()
+if _render_host and _render_host not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(_render_host)
 
 INSTALLED_APPS = [
     "daphne",
@@ -59,9 +65,16 @@ ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
+# Prefer self-contained templates/ (Render) then monorepo frontend/templates
+_FRONTEND_CANDIDATES = [
+    BASE_DIR / "templates",
+    BASE_DIR.parent / "frontend" / "templates",
+]
+FRONTEND_DIR = next((p for p in _FRONTEND_CANDIDATES if p.is_dir()), BASE_DIR / "templates")
+
 TEMPLATES = [{
     "BACKEND": "django.template.backends.django.DjangoTemplates",
-    "DIRS": [BASE_DIR.parent / "frontend" / "templates"],
+    "DIRS": [FRONTEND_DIR],
     "APP_DIRS": True,
     "OPTIONS": {"context_processors": [
         "django.template.context_processors.debug",
@@ -71,20 +84,50 @@ TEMPLATES = [{
     ]},
 }]
 
-STATICFILES_DIRS = [
+_STATIC_CANDIDATES = [
+    BASE_DIR / "static",
     BASE_DIR.parent / "frontend" / "static",
+    FRONTEND_DIR,  # css/js/img next to HTML for same-origin hosting
 ]
+STATICFILES_DIRS = [p for p in _STATIC_CANDIDATES if p.is_dir()]
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('DB_NAME'),
-        'USER': os.getenv('DB_USER'),
-        'PASSWORD': os.getenv('DB_PASSWORD'),
-        'HOST': os.getenv('DB_HOST', '127.0.0.1'),
-        'PORT': os.getenv('DB_PORT', '5432'),
+# Database — DATABASE_URL on Render/hosted Postgres; SQLite locally
+_default_sqlite = f"sqlite:///{(BASE_DIR / 'db.sqlite3').as_posix()}"
+_db_url = os.getenv("DATABASE_URL", _default_sqlite)
+try:
+    import dj_database_url
+
+    _is_postgres = _db_url.startswith(("postgres://", "postgresql://"))
+    DATABASES = {
+        "default": dj_database_url.config(
+            default=_db_url,
+            conn_max_age=600,
+            ssl_require=_is_postgres
+            and (
+                bool(os.getenv("RENDER"))
+                or os.getenv("DATABASE_SSL", "False") == "True"
+            ),
+        )
     }
-}
+except Exception:
+    if os.getenv("DB_NAME"):
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.postgresql",
+                "NAME": os.getenv("DB_NAME"),
+                "USER": os.getenv("DB_USER"),
+                "PASSWORD": os.getenv("DB_PASSWORD"),
+                "HOST": os.getenv("DB_HOST", "127.0.0.1"),
+                "PORT": os.getenv("DB_PORT", "5432"),
+            }
+        }
+    else:
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.sqlite3",
+                "NAME": BASE_DIR / "db.sqlite3",
+            }
+        }
 
 AUTH_USER_MODEL = "accounts.User"
 
@@ -107,11 +150,13 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_CLASSES": (
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.ScopedRateThrottle",
     ),
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "100/hour",
-        "user": "2000/hour",
-        "iot": "10000/hour",
+        # Agent posts ~2 readings/sec + heartbeat/commands; keep headroom for local kits.
+        "anon": "1000/hour",
+        "user": "5000/hour",
+        "iot": "120000/hour",
         "login": "8/minute",
     },
 }
@@ -125,7 +170,6 @@ SIMPLE_JWT = {
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
-# Harden browser / proxy defaults (production-friendly; safe for local HTTP too)
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_BROWSER_XSS_FILTER = True
 X_FRAME_OPTIONS = "DENY"
@@ -133,23 +177,43 @@ SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_HTTPONLY = True
 CORS_ALLOW_CREDENTIALS = False
 
+# Behind Render's TLS proxy
+if os.getenv("RENDER") or os.getenv("FORCE_SCRIPT_NAME") is not None:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+_csrf = os.getenv("CSRF_TRUSTED_ORIGINS", "").strip()
+if _csrf:
+    CSRF_TRUSTED_ORIGINS = [x.strip() for x in _csrf.split(",") if x.strip()]
+elif _render_host:
+    CSRF_TRUSTED_ORIGINS = [f"https://{_render_host}"]
+else:
+    CSRF_TRUSTED_ORIGINS = []
+
 SPECTACULAR_SETTINGS = {
-    "TITLE": "CUE Water Monitoring API",
-    "DESCRIPTION": "IoT water monitoring, leak detection and valve control backend.",
+    "TITLE": "CUE Liquid Transport API",
+    "DESCRIPTION": "IoT liquid transport monitoring (water, oil, and other pipe fluids), leak detection and valve control. Same differential flow algorithm across fluids.",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
 }
 
-CORS_ALLOWED_ORIGINS = os.getenv(
-    "CORS_ALLOWED_ORIGINS",
-    "http://localhost:3000,http://127.0.0.1:3000,"
-    "http://localhost:5173,http://127.0.0.1:5173,"
-    "http://localhost:5500,http://127.0.0.1:5500,"
-    "https://cue.zirocreativeagency.co.ke,"
-    "http://cue.zirocreativeagency.co.ke",
-).split(",")
+CORS_ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000,"
+        "http://localhost:5173,http://127.0.0.1:5173,"
+        "http://localhost:5500,http://127.0.0.1:5500,"
+        "https://cue.zirocreativeagency.co.ke,"
+        "http://cue.zirocreativeagency.co.ke,"
+        "https://cue-backend-rd5t.onrender.com",
+    ).split(",")
+    if o.strip()
+]
+if _render_host:
+    _origin = f"https://{_render_host}"
+    if _origin not in CORS_ALLOWED_ORIGINS:
+        CORS_ALLOWED_ORIGINS.append(_origin)
 
-# Redis optional for local kit runs — InMemory keeps WS workable without Redis.
 _REDIS_URL = os.getenv("REDIS_URL", "").strip()
 if _REDIS_URL:
     CHANNEL_LAYERS = {
@@ -163,11 +227,9 @@ else:
         "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}
     }
 
-# Uno USB serial (IOT/firmware) — used by `manage.py listen_uno`
 SERIAL_PORT = os.getenv("SERIAL_PORT", "COM10")
 SERIAL_BAUD = int(os.getenv("SERIAL_BAUD", "9600"))
 
-# TextSMS Kenya — leak alert protocol
 TEXTSMS_API_URL = os.getenv(
     "TEXTSMS_API_URL", "https://sms.textsms.co.ke/api/services/sendsms/"
 )
@@ -180,7 +242,6 @@ ALERT_PHONES = [
     if p.strip()
 ]
 
-# MsingiAI — Swahili speech (TTS/STT); key stays server-side
 MSINGI_API_KEY = os.getenv("MSINGI_API_KEY", "")
 MSINGI_BASE_URL = os.getenv("MSINGI_BASE_URL", "https://api.msingiai.com").rstrip("/")
 MSINGI_VOICE_ID = os.getenv("MSINGI_VOICE_ID", "female3")
@@ -193,8 +254,9 @@ LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_STORAGE = "whitenoise.storage.CompressedStaticFilesStorage"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"

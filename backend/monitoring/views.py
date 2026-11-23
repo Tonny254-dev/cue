@@ -10,6 +10,7 @@ from .models import Sensor, Pipeline, PipelineSection, FlowReading, Consumption
 from .serializers import (SensorSerializer, PipelineSerializer, PipelineSectionSerializer,
                           FlowReadingSerializer, ConsumptionSerializer)
 from .services import latest_reading_for_sensor, consumption_today, current_flow_rate
+from .fluids import list_fluid_profiles, OUT_OF_GUARANTEE
 
 # ---------- Devices & Sensors management endpoints ----------
 class SensorListView(generics.ListAPIView):
@@ -55,6 +56,26 @@ class PipelineSectionListView(generics.ListAPIView):
     serializer_class = PipelineSectionSerializer
     permission_classes = [IsAuthenticated]
 
+
+class FluidProfilesView(APIView):
+    """Catalog of supported pipe liquids + explicit non-guarantees."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return success_response(
+            {
+                "profiles": list_fluid_profiles(),
+                "out_of_guarantee": OUT_OF_GUARANTEE,
+                "guarantee": (
+                    "Differential leak detection works for any single-phase pipe liquid "
+                    "when both sensors are fluid-compatible, share a calibrated K-factor, "
+                    "and inlet flow is above the fluid arm threshold."
+                ),
+            }
+        )
+
+
 # ---------- Live Monitoring ----------
 class LiveMonitoringView(APIView):
     permission_classes = [IsAuthenticated]
@@ -63,6 +84,7 @@ class LiveMonitoringView(APIView):
         pipeline = Pipeline.objects.filter(pk=pipeline_id).first() if pipeline_id else Pipeline.objects.first()
         data = {
             "pipeline_id": pipeline.id if pipeline else None,
+            "fluid_type": getattr(pipeline, "fluid_type", None) if pipeline else None,
             "current_flow_rate": current_flow_rate(pipeline),
             "unit": "L/min",
             "consumption_today": consumption_today(pipeline),

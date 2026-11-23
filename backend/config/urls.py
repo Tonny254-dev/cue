@@ -1,11 +1,15 @@
+from pathlib import Path
+
 from django.contrib import admin
-from django.http import JsonResponse
-from django.urls import path, include
+from django.http import FileResponse, Http404, JsonResponse
+from django.urls import path, include, re_path
+from django.views.static import serve
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularSwaggerView,
     SpectacularRedocView,
 )
+from django.conf import settings
 
 api_patterns = [
     path("", include("accounts.urls")),
@@ -25,12 +29,12 @@ api_patterns = [
 
 
 def api_index(_request):
-    """Small discovery page so hitting / is not a 404."""
     return JsonResponse({
-        "service": "CUE Water Monitoring API",
+        "service": "CUE Liquid Transport API",
         "version": "1.0.0",
         "status": "running",
         "endpoints": {
+            "app": "/app/",
             "api_root": "/api/v1/",
             "docs_swagger": "/api/docs/",
             "docs_redoc": "/api/redoc/",
@@ -41,11 +45,40 @@ def api_index(_request):
     })
 
 
+FRONTEND_ROOT = Path(getattr(settings, "FRONTEND_DIR", settings.BASE_DIR / "templates"))
+
+
+def frontend_index(_request):
+    index = FRONTEND_ROOT / "index.html"
+    if not index.is_file():
+        return api_index(_request)
+    return FileResponse(index.open("rb"), content_type="text/html")
+
+
+def frontend_file(_request, path: str):
+    """Serve public UI files (html/css/js/img) from FRONTEND_DIR."""
+    # Never shadow API / admin
+    if path.startswith(("api/", "admin/", "ws/", "static/", "media/")):
+        raise Http404()
+    target = (FRONTEND_ROOT / path).resolve()
+    try:
+        target.relative_to(FRONTEND_ROOT.resolve())
+    except ValueError as exc:
+        raise Http404() from exc
+    if target.is_dir():
+        target = target / "index.html"
+    if not target.is_file():
+        raise Http404()
+    return serve(_request, path=str(target.relative_to(FRONTEND_ROOT)), document_root=str(FRONTEND_ROOT))
+
+
 urlpatterns = [
-    path("", api_index, name="api-index"),
     path("admin/", admin.site.urls),
     path("api/v1/", include(api_patterns)),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
     path("api/redoc/", SpectacularRedocView.as_view(url_name="schema"), name="redoc"),
+    path("app/", frontend_index, name="app-home"),
+    path("", frontend_index, name="home"),
+    re_path(r"^(?P<path>.+)$", frontend_file, name="frontend-file"),
 ]

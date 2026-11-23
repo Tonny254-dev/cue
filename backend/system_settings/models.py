@@ -21,6 +21,25 @@ class SystemSettings(TimeStampedModel):
     automatic_leak_detection = models.BooleanField(default=True)
     device_heartbeat_timeout = models.IntegerField(default=120,
         validators=[MinValueValidator(10)])
+    min_flow_arm_lpm = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=2.0,
+        validators=[MinValueValidator(0)],
+        help_text="Minimum inlet L/min before leak detection arms (overridden by fluid profile when set on pipeline)",
+    )
+    flow_noise_lpm = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0.40,
+        validators=[MinValueValidator(0)],
+        help_text="Treat flow below this as dry-pipe noise",
+    )
+    default_fluid_type = models.CharField(
+        max_length=32,
+        default="WATER",
+        help_text="Default fluid profile for new pipelines",
+    )
 
     @classmethod
     def load(cls):

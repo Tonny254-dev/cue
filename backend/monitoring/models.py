@@ -16,12 +16,33 @@ class Pipeline(TimeStampedModel):
                                         help_text="Diameter in mm")
     location = models.CharField(max_length=200, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    fluid_type = models.CharField(
+        max_length=32,
+        default="WATER",
+        db_index=True,
+        help_text="Fluid profile code: WATER, DIESEL, OIL_LIGHT, OIL_HEAVY, CHEMICAL_AQUEOUS, PROCESS_GENERIC",
+    )
+    viscosity_class = models.CharField(
+        max_length=16,
+        default="LOW",
+        help_text="LOW | MEDIUM | HIGH — drives arm/noise defaults from fluid profile",
+    )
+    sensor_class = models.CharField(
+        max_length=64,
+        blank=True,
+        default="YF-S201",
+        help_text="Installed meter family (must be compatible with fluid_type)",
+    )
 
     class Meta:
         ordering = ["pipeline_name"]
 
     def __str__(self):
         return f"{self.pipeline_name} ({self.pipeline_code})"
+
+    def fluid_profile(self):
+        from monitoring.fluids import get_fluid_profile
+        return get_fluid_profile(self.fluid_type)
 
 class Sensor(TimeStampedModel):
     class Type(models.TextChoices):
@@ -41,8 +62,12 @@ class Sensor(TimeStampedModel):
     sensor_position = models.CharField(max_length=10, choices=Position.choices)
     pipeline = models.ForeignKey(Pipeline, on_delete=models.SET_NULL, null=True,
                                  blank=True, related_name="sensors")
-    calibration_factor = models.DecimalField(max_digits=10, decimal_places=4, default=7.5,
-                                             help_text="Pulses per litre factor")
+    calibration_factor = models.DecimalField(
+        max_digits=10,
+        decimal_places=4,
+        default=7.5,
+        help_text="K-factor: pulses per litre (fluid- and meter-specific)",
+    )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
     installation_date = models.DateField(null=True, blank=True)
 

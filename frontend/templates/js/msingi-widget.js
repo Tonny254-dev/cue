@@ -7,8 +7,11 @@
 
   var PHONE_DISPLAY = '0701519479';
   var PHONE_E164 = '254701519479';
-  var API_BASE = (window.AP && window.AP.CONFIG && window.AP.CONFIG.API_BASE)
-    || 'http://localhost:8000/api/v1';
+  var API_BASE = (window.AP && window.AP.CONFIG && window.AP.CONFIG.API_BASE) || (function () {
+    var host = location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:8000/api/v1';
+    return location.origin.replace(/\/$/, '') + '/api/v1';
+  })();
   var BRAND = 'CUE Assistance';
 
   function el(html) {

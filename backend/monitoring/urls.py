@@ -10,6 +10,7 @@ urlpatterns = [
     # Pipelines
     path("pipelines/", views.PipelineListView.as_view()),
     path("pipelines/sections/", views.PipelineSectionListView.as_view()),
+    path("fluids/profiles/", views.FluidProfilesView.as_view()),
     # Live monitoring
     path("monitoring/live/", views.LiveMonitoringView.as_view()),
     path("monitoring/flow-rate/", views.FlowRateView.as_view()),

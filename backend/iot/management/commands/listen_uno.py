@@ -113,12 +113,18 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
             "--port",
-            default=getattr(settings, "SERIAL_PORT", None) or "COM10",
+            default=getattr(settings, "SERIAL_PORT", None) or "",
+            help="COM port (empty + --auto = discover any port)",
         )
         parser.add_argument(
             "--baud",
             type=int,
             default=int(getattr(settings, "SERIAL_BAUD", 9600) or 9600),
+        )
+        parser.add_argument(
+            "--auto",
+            action="store_true",
+            help="Auto-detect Uno on any COM port and reconnect forever when replugged",
         )
 
     def handle(self, *args, **options):
@@ -131,11 +137,30 @@ class Command(BaseCommand):
         from monitoring.models import FlowReading
         from devices.models import DeviceCommunicationLog
 
-        port, baud = options["port"], options["baud"]
-        self.stdout.write("Ports:")
-        for p in list_ports.comports():
-            self.stdout.write(f"  {p.device}: {p.description}")
-        self.stdout.write(self.style.SUCCESS(f"Listening {port} @ {baud}"))
+        baud = options["baud"]
+        auto = options["auto"] or not (options["port"] or "").strip()
+        port = (options["port"] or "").strip() or "COM10"
+
+        ARDUINO_VIDS = {0x2341, 0x2A03, 0x1A86, 0x0403, 0x10C4, 0x067B}
+
+        def discover_port() -> str | None:
+            ports = list(list_ports.comports())
+            self.stdout.write("Ports:")
+            for p in ports:
+                self.stdout.write(f"  {p.device}: {p.description}")
+            if not ports:
+                return None
+            ranked = []
+            for p in ports:
+                score = 0
+                desc = f"{p.description or ''} {p.manufacturer or ''}".lower()
+                if p.vid and int(p.vid) in ARDUINO_VIDS:
+                    score += 100
+                if any(k in desc for k in ("arduino", "ch340", "uno", "usb-serial", "cp210")):
+                    score += 50
+                ranked.append((score, p.device))
+            ranked.sort(key=lambda x: (-x[0], x[1]))
+            return ranked[0][1] if ranked else None
 
         device, s1, s2, pipe = _ensure_kit()
         # Ensure auto leak detect + valve shutdown are on for the kit
@@ -189,6 +214,16 @@ class Command(BaseCommand):
 
         while True:
             try:
+                if auto:
+                    found = discover_port()
+                    if not found:
+                        self.stdout.write(
+                            self.style.WARNING("No serial device — plug Uno into any USB port…")
+                        )
+                        time.sleep(2)
+                        continue
+                    port = found
+                self.stdout.write(self.style.SUCCESS(f"Listening {port} @ {baud}"))
                 with serial.Serial(port, baud, timeout=0.2) as ser:
                     device.mark_connected()
                     self.stdout.write(self.style.SUCCESS(f"Connected {port}"))

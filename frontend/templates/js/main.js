@@ -37,9 +37,23 @@
      1. CONFIG
      ============================================================ */
   var CONFIG = {
-    API_BASE: 'http://localhost:8000/api/v1',
-    WS_BASE:  (location.protocol === 'https:' ? 'wss://' : 'ws://') +
-              (location.hostname || 'localhost') + ':8000/ws/stream/',
+    API_BASE: (function () {
+      var host = location.hostname;
+      if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:8000/api/v1';
+      return location.origin.replace(/\/$/, '') + '/api/v1';
+    })(),
+    WS_BASE: (function () {
+      var host = location.hostname || 'localhost';
+      var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+      if (host === 'localhost' || host === '127.0.0.1') return proto + host + ':8000/ws/stream/';
+      return proto + location.host + '/ws/stream/';
+    })(),
+    // Instant path: Uno agent SSE (serial → browser, skips Django for the live number)
+    LIVE_SSE: (function () {
+      var host = location.hostname;
+      if (host === 'localhost' || host === '127.0.0.1') return 'http://127.0.0.1:8765/live';
+      return '';
+    })(),
     THEME_KEY: 'ap_theme',
     REQUEST_TIMEOUT: 15000,
   };
@@ -424,7 +438,7 @@
     var flowRange = 'live';
     var chartRange = null;
     var FLOW_COLORS = { INLET: '#3b82f6', OUTLET: '#22c55e', OTHER: '#f59e0b' };
-    var TREND_MS = { live: 2000, day: 15000, week: 60000, month: 60000 };
+    var TREND_MS = { live: 1000, day: 15000, week: 60000, month: 60000 };
 
     function themeColors() {
       var dark = document.documentElement.getAttribute('data-theme') === 'dark';
@@ -700,18 +714,32 @@
       }).catch(function (err) { console.error('[dashboard] connectivity failed:', err); setError('deviceConnectivityList', 'Could not load devices'); });
     }
 
+    function applyDashFlow(data) {
+      var rate = data.inlet_lpm != null ? data.inlet_lpm : data.flow_rate;
+      if (rate == null || isNaN(Number(rate))) rate = data.outlet_lpm;
+      setText('kpiFlow', fmt.num(rate));
+      markLive('Instant · ' + new Date().toLocaleTimeString());
+      if (flowRange === 'live' && Date.now() - lastTrendAt > 400) {
+        loadFlowTrend(true);
+      }
+    }
+
+    function connectLiveSSE() {
+      if (!CONFIG.LIVE_SSE || typeof EventSource === 'undefined') return;
+      try {
+        liveSse = new EventSource(CONFIG.LIVE_SSE);
+        liveSse.onmessage = function (ev) {
+          try { applyDashFlow(JSON.parse(ev.data || '{}')); } catch (e) {}
+        };
+      } catch (e) { console.warn('[dashboard] SSE unavailable', e); }
+    }
+
     function connectWS() {
       ws = new WSClient('dashboard', {
         onMessage: function (evt) {
           var type = evt.type, data = evt.data || {};
           if (type === 'flow_reading_updated') {
-            var rate = data.inlet_lpm != null ? data.inlet_lpm : data.flow_rate;
-            setText('kpiFlow', fmt.num(rate));
-            markLive('Live from sensor');
-            // Keep chart streaming without a page refresh
-            if (flowRange === 'live' && Date.now() - lastTrendAt > 900) {
-              loadFlowTrend(true);
-            }
+            applyDashFlow(data);
           }
           if (type === 'new_notification') {
             var dot = el('topbarUnreadDot'); if (dot) dot.classList.remove('d-none');
@@ -729,23 +757,26 @@
     });
 
     // Initial paint + continuous auto-update (no manual refresh needed)
+    var liveSse = null;
     loadOverview(true);
     setFlowRange('live');
     loadConsumption();
     loadActivity();
     loadConnectivity();
+    connectLiveSSE();
     connectWS();
 
     pollTimer = setInterval(function () {
       loadOverview(true);
       loadConnectivity();
       if (flowRange !== 'live') loadFlowTrend(true);
-    }, 10000);
+    }, 5000);
 
     window.addEventListener('beforeunload', function () {
       if (pollTimer) clearInterval(pollTimer);
       if (trendTimer) clearInterval(trendTimer);
       if (ws) ws.close();
+      if (liveSse) try { liveSse.close(); } catch (e) {}
     });
   });
 
@@ -753,9 +784,10 @@
      12. PAGE: live-monitoring
      ============================================================ */
   register('live-monitoring', function () {
-    var liveChart = null, historyChart = null, ws = null, liveTimer = null;
+    var liveChart = null, historyChart = null, ws = null, liveTimer = null, liveSse = null;
     var liveSamples = [];
-    var LIVE_MAX = 60, LIVE_MS = 2000;
+    // SSE is the fast path; REST is a slow safety net.
+    var LIVE_MAX = 120, LIVE_MS = 5000;
 
     function themeColors() {
       var dark = document.documentElement.getAttribute('data-theme') === 'dark';
@@ -906,20 +938,57 @@
       }).catch(function (err) { console.error('[live] readings failed:', err); setError('readingsTableBody', 'Could not load readings'); });
     }
 
+    function applyFlowTick(data) {
+      var inlet = Number(data.inlet_lpm != null ? data.inlet_lpm : data.flow_rate);
+      var outlet = Number(data.outlet_lpm != null ? data.outlet_lpm : 0);
+      var flow = Number(data.flow_rate != null ? data.flow_rate : Math.max(inlet || 0, outlet || 0));
+      if (isNaN(flow)) return;
+      setText('lm-flow-rate', fmt.num(flow));
+      setText('lm-flow-updated', 'Live · ' + new Date().toLocaleTimeString());
+      setText('lm-live-indicator', 'Instant · ' + new Date().toLocaleTimeString());
+      pushLivePoint(flow);
+      // Soft-update S1/S2 cards when present
+      var s1 = el('lm-sensor-s1') || el('sensor-s1-rate');
+      var s2 = el('lm-sensor-s2') || el('sensor-s2-rate');
+      if (s1 && !isNaN(inlet)) s1.textContent = fmt.num(inlet) + ' L/min';
+      if (s2 && !isNaN(outlet)) s2.textContent = fmt.num(outlet) + ' L/min';
+    }
+
+    function connectLiveSSE() {
+      if (!CONFIG.LIVE_SSE || typeof EventSource === 'undefined') return;
+      try {
+        liveSse = new EventSource(CONFIG.LIVE_SSE);
+        liveSse.onopen = function () {
+          setText('lm-live-indicator', 'Instant link · connected');
+        };
+        liveSse.onmessage = function (ev) {
+          try {
+            applyFlowTick(JSON.parse(ev.data || '{}'));
+          } catch (e) { /* ignore bad frames */ }
+        };
+        liveSse.onerror = function () {
+          setText('lm-live-indicator', 'Instant link reconnecting…');
+        };
+      } catch (e) {
+        console.warn('[live] SSE unavailable', e);
+      }
+    }
+
     function connectWS() {
       ws = new WSClient('monitoring', {
         onMessage: function (evt) {
           var type = evt.type, data = evt.data || {};
           if (type === 'flow_reading_updated') {
-            setText('lm-flow-rate', fmt.num(data.flow_rate));
-            setText('lm-flow-updated', 'Live · ' + new Date().toLocaleTimeString());
-            setText('lm-live-indicator', 'Live · ' + new Date().toLocaleTimeString());
-            pushLivePoint(data.flow_rate);
+            applyFlowTick(data);
           }
         },
         onStatus: function (s) {
-          if (s === 'OPEN') setText('lm-live-indicator', 'Live · connected');
-          if (s === 'CLOSED') setText('lm-live-indicator', 'Reconnecting…');
+          if (s === 'OPEN' && !(liveSse && liveSse.readyState === 1)) {
+            setText('lm-live-indicator', 'Live · connected');
+          }
+          if (s === 'CLOSED' && !(liveSse && liveSse.readyState === 1)) {
+            setText('lm-live-indicator', 'Reconnecting…');
+          }
         },
       });
     }
@@ -935,12 +1004,14 @@
     loadLive();
     loadHistory();
     loadRecentReadings();
+    connectLiveSSE();
     connectWS();
 
     liveTimer = setInterval(loadLive, LIVE_MS);
     window.addEventListener('beforeunload', function () {
       if (liveTimer) clearInterval(liveTimer);
       if (ws) ws.close();
+      if (liveSse) try { liveSse.close(); } catch (e) {}
     });
   });
 

@@ -1,6 +1,7 @@
 from django.db import transaction, IntegrityError
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework import status
 from core.utils import success_response, created_response, error_response
 from devices.models import Device, DeviceCommunicationLog
@@ -15,13 +16,23 @@ from .serializers import (ReadingIngestSerializer, BulkReadingsSerializer,
                           DeviceStatusSerializer, DeviceWarningSerializer,
                           ValveStatusReportSerializer)
 
+
+class IoTAPIView(APIView):
+    """Device ingest uses empty auth classes (manual DeviceAuthentication) —
+    do not apply AnonRateThrottle (100/hour) or the kit gets 429 within a minute."""
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "iot"
+
 def _principal(request):
     return getattr(request.user, "device", None)
 
 def _ensure_sensor(device: Device, sensor_identifier: str) -> Sensor | None:
     return Sensor.objects.filter(device=device, sensor_identifier=sensor_identifier).first()
 
-def _persist_reading(device: Device, payload: dict) -> FlowReading:
+def _persist_reading(device: Device, payload: dict, *, broadcast: bool = True) -> FlowReading:
     sensor = _ensure_sensor(device, payload["sensor_id"])
     if not sensor:
         raise ValueError(f"Unknown sensor {payload['sensor_id']} for this device")
@@ -41,24 +52,38 @@ def _persist_reading(device: Device, payload: dict) -> FlowReading:
             reading_timestamp=payload["timestamp"],
             pulse_count=payload.get("pulse_count", 0),
         ).first()
-    # broadcast & leak eval
-    try:
-        from config.broadcast import broadcast_flow_reading
-        broadcast_flow_reading(reading)
-    except Exception:
-        pass
-    if sensor.pipeline_id:
+    if broadcast:
         try:
-            from leak_detection.services import evaluate_pipeline
-            evaluate_pipeline(sensor.pipeline)
+            from config.broadcast import broadcast_flow_reading
+            broadcast_flow_reading(reading)
+        except Exception:
+            pass
+    if sensor.pipeline_id:
+        # Never block ingest on leak math — evaluate in a daemon thread, throttled.
+        try:
+            import threading
+            import time as _time
+            pipe = sensor.pipeline
+            key = pipe.id
+            now = _time.monotonic()
+            last = getattr(_persist_reading, "_last_eval", {})
+            if now - float(last.get(key, 0.0)) >= 5.0:
+                last[key] = now
+                _persist_reading._last_eval = last  # type: ignore[attr-defined]
+
+                def _eval():
+                    try:
+                        from leak_detection.services import evaluate_pipeline
+                        evaluate_pipeline(pipe)
+                    except Exception:
+                        pass
+
+                threading.Thread(target=_eval, name="leak-eval", daemon=True).start()
         except Exception:
             pass
     return reading
 
-class ReadingIngestView(APIView):
-    permission_classes = [AllowAny]
-    authentication_classes = []
-    throttle_scope = "iot"
+class ReadingIngestView(IoTAPIView):
 
     def post(self, request):
         from iot.authentication import DeviceAuthentication
@@ -86,9 +111,7 @@ class ReadingIngestView(APIView):
                                               payload={"sensor": payload["sensor_id"]})
         return created_response({"id": reading.id if reading else None}, "Reading recorded")
 
-class BulkReadingsView(APIView):
-    permission_classes = [AllowAny]
-    authentication_classes = []
+class BulkReadingsView(IoTAPIView):
 
     def post(self, request):
         from iot.authentication import DeviceAuthentication
@@ -101,21 +124,34 @@ class BulkReadingsView(APIView):
         serializer.is_valid(raise_exception=True)
         accepted = 0
         errors = []
+        saved = []
         for item in serializer.validated_data["readings"]:
             if item["device_id"] != device.device_identifier:
                 errors.append({"sensor_id": item["sensor_id"], "error": "device mismatch"})
                 continue
             try:
-                _persist_reading(device, item)
+                reading = _persist_reading(device, item, broadcast=False)
                 accepted += 1
+                if reading is not None:
+                    saved.append(reading)
             except ValueError as ve:
                 errors.append({"sensor_id": item["sensor_id"], "error": str(ve)})
         device.mark_connected()
+        if len(saved) >= 2:
+            try:
+                from config.broadcast import broadcast_kit_flow
+                broadcast_kit_flow(saved[0], saved[1])
+            except Exception:
+                pass
+        elif len(saved) == 1:
+            try:
+                from config.broadcast import broadcast_flow_reading
+                broadcast_flow_reading(saved[0])
+            except Exception:
+                pass
         return created_response({"accepted": accepted, "errors": errors}, "Bulk ingested")
 
-class SensorReadingView(APIView):
-    permission_classes = [AllowAny]
-    authentication_classes = []
+class SensorReadingView(IoTAPIView):
 
     def post(self, request, pk):
         from iot.authentication import DeviceAuthentication
@@ -140,9 +176,7 @@ class SensorReadingView(APIView):
         reading = _persist_reading(device, serializer.validated_data)
         return created_response({"id": reading.id if reading else None}, "Reading recorded")
 
-class SensorConfigView(APIView):
-    permission_classes = [AllowAny]
-    authentication_classes = []
+class SensorConfigView(IoTAPIView):
 
     def get(self, request, pk):
         from iot.authentication import DeviceAuthentication
@@ -159,9 +193,7 @@ class SensorConfigView(APIView):
             "sensor_position": sensor.sensor_position,
         })
 
-class HeartbeatView(APIView):
-    permission_classes = [AllowAny]
-    authentication_classes = []
+class HeartbeatView(IoTAPIView):
 
     def post(self, request):
         from iot.authentication import DeviceAuthentication
@@ -183,9 +215,7 @@ class HeartbeatView(APIView):
         return success_response({"server_time": __import__("django.utils.timezone", fromlist=["now"]).now()},
                                 "Heartbeat accepted")
 
-class DeviceRegisterView(APIView):
-    permission_classes = [AllowAny]
-    authentication_classes = []
+class DeviceRegisterView(IoTAPIView):
 
     def post(self, request):
         serializer = DeviceRegisterSerializer(data=request.data)
@@ -212,9 +242,7 @@ class DeviceRegisterView(APIView):
         return error_response("Device already registered",
                               status_code=status.HTTP_409_CONFLICT)
 
-class DeviceStatusReportView(APIView):
-    permission_classes = [AllowAny]
-    authentication_classes = []
+class DeviceStatusReportView(IoTAPIView):
 
     def post(self, request):
         from iot.authentication import DeviceAuthentication
@@ -230,9 +258,7 @@ class DeviceStatusReportView(APIView):
                                               payload=serializer.validated_data)
         return success_response({"acknowledged": True})
 
-class DeviceWarningView(APIView):
-    permission_classes = [AllowAny]
-    authentication_classes = []
+class DeviceWarningView(IoTAPIView):
 
     def post(self, request):
         from iot.authentication import DeviceAuthentication
@@ -253,9 +279,7 @@ class DeviceWarningView(APIView):
                    description=serializer.validated_data["title"], category="DEVICE")
         return success_response({"acknowledged": True})
 
-class DeviceConfigView(APIView):
-    permission_classes = [AllowAny]
-    authentication_classes = []
+class DeviceConfigView(IoTAPIView):
 
     def get(self, request, pk):
         from iot.authentication import DeviceAuthentication
@@ -273,9 +297,7 @@ class DeviceConfigView(APIView):
                                                   "sensor_position", "calibration_factor")),
         })
 
-class PendingCommandsView(APIView):
-    permission_classes = [AllowAny]
-    authentication_classes = []
+class PendingCommandsView(IoTAPIView):
 
     def get(self, request):
         from iot.authentication import DeviceAuthentication
@@ -295,9 +317,7 @@ class PendingCommandsView(APIView):
         } for c in cmds]
         return success_response({"commands": data})
 
-class AcknowledgeCommandView(APIView):
-    permission_classes = [AllowAny]
-    authentication_classes = []
+class AcknowledgeCommandView(IoTAPIView):
 
     def post(self, request, pk):
         from iot.authentication import DeviceAuthentication
@@ -311,9 +331,7 @@ class AcknowledgeCommandView(APIView):
         acknowledge_command(cmd)
         return success_response({"status": cmd.execution_status})
 
-class ExecuteCommandView(APIView):
-    permission_classes = [AllowAny]
-    authentication_classes = []
+class ExecuteCommandView(IoTAPIView):
 
     def post(self, request, pk):
         from iot.authentication import DeviceAuthentication
@@ -329,9 +347,7 @@ class ExecuteCommandView(APIView):
         execute_command(cmd, success, message)
         return success_response({"status": cmd.execution_status})
 
-class ValveStatusReportView(APIView):
-    permission_classes = [AllowAny]
-    authentication_classes = []
+class ValveStatusReportView(IoTAPIView):
 
     def post(self, request, pk):
         from iot.authentication import DeviceAuthentication
