@@ -1,5 +1,5 @@
 """
-USB serial bridge: Arduino Uno (IOT/firmware) -> CUE backend models.
+USB serial bridge: Arduino Uno (IOT/firmware) -> Cue Flow backend models.
 
 Minimal glue only — does not change firmware or product APIs.
 """
@@ -47,7 +47,7 @@ def _ensure_kit():
     device, _ = Device.objects.get_or_create(
         device_identifier="UNO-KIT-001",
         defaults={
-            "device_name": "CUE Uno Kit",
+            "device_name": "Cue Flow Uno Kit",
             "device_type": Device.DeviceType.ARDUINO_ESP,
             "location": "Lab / COM serial",
             "is_active": True,
@@ -88,7 +88,7 @@ def _ensure_kit():
     valve, _ = Valve.objects.get_or_create(
         valve_identifier="UNO-KIT-001-VALVE",
         defaults={
-            "valve_name": "CUE Kit Valve",
+            "valve_name": "Cue Flow Kit Valve",
             "device": device,
             "pipeline": pipe,
             "current_status": Valve.Status.OPEN,
@@ -108,7 +108,7 @@ def _ensure_kit():
 
 
 class Command(BaseCommand):
-    help = "Bridge IOT/firmware Uno serial into CUE (devices/monitoring)"
+    help = "Bridge IOT/firmware Uno serial into Cue Flow (devices/monitoring)"
 
     def add_arguments(self, parser):
         parser.add_argument(

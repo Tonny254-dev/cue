@@ -16,7 +16,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--api-base",
             default="http://127.0.0.1:8000/api/v1",
-            help="CUE API base the Windows agent will POST to",
+            help="Cue Flow API base the Windows agent will POST to",
         )
         parser.add_argument(
             "--port",
@@ -37,7 +37,7 @@ class Command(BaseCommand):
         device, _ = Device.objects.get_or_create(
             device_identifier="UNO-KIT-001",
             defaults={
-                "device_name": "CUE Uno Kit",
+                "device_name": "Cue Flow Uno Kit",
                 "device_type": Device.DeviceType.ARDUINO_ESP,
                 "location": "USB serial COM10",
                 "is_active": True,
@@ -77,7 +77,7 @@ class Command(BaseCommand):
         valve, _ = Valve.objects.get_or_create(
             valve_identifier="UNO-KIT-001-VALVE",
             defaults={
-                "valve_name": "CUE Kit Valve",
+                "valve_name": "Cue Flow Kit Valve",
                 "device": device,
                 "pipeline": pipe,
                 "current_status": Valve.Status.OPEN,

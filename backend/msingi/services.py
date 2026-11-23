@@ -1,4 +1,4 @@
-"""CUE Assistance — Kiswahili/English helper for the public site (safe facts only)."""
+"""Cue Flow Assistance — Kiswahili/English helper for the public site (safe facts only)."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ _FAQ: list[tuple[tuple[str, ...], str]] = [
             "good afternoon",
             "good evening",
         ),
-        "Habari! Mimi ni CUE Assistance. Naweza kukueleza kuhusu CUE, namba ya simu, barua pepe, "
+        "Habari! Mimi ni Cue Flow Assistance. Naweza kukueleza kuhusu Cue Flow, namba ya simu, barua pepe, "
         "mahali, masaa, uvujaji, valvu, dashibodi, au jinsi ya kuingia. Uliza swali lolote.",
     ),
     (
@@ -60,7 +60,7 @@ _FAQ: list[tuple[tuple[str, ...], str]] = [
             "chatbot",
             "bot",
         ),
-        "Mimi ni CUE Assistance — msaidizi wa kidijitali wa CUE. Ninajibu kwa Kiswahili na Kiingereza "
+        "Mimi ni Cue Flow Assistance — msaidizi wa kidijitali wa Cue Flow. Ninajibu kwa Kiswahili na Kiingereza "
         "(maandishi na sauti) kuhusu bidhaa, mawasiliano, na jinsi dashibodi inavyofanya kazi — bila kutoa siri.",
     ),
     (
@@ -77,7 +77,7 @@ _FAQ: list[tuple[tuple[str, ...], str]] = [
             "services",
             "huduma",
         ),
-        "Ninaweza: kueleza CUE ni nini; kutoa namba/WhatsApp/barua pepe/anwani; kueleza masaa ya kazi; "
+        "Ninaweza: kueleza Cue Flow ni nini; kutoa namba/WhatsApp/barua pepe/anwani; kueleza masaa ya kazi; "
         "kufafanua uvujaji, valvu, mtiririko, na dashibodi; na kuongoza jinsi ya kuingia (Login). "
         "Siwezi kutoa nenosiri, funguo za API, au ripoti za fedha za ndani.",
     ),
@@ -97,21 +97,21 @@ _FAQ: list[tuple[tuple[str, ...], str]] = [
             "namba yao",
             "number yao",
         ),
-        f"Namba ya CUE: {PHONE}. Unaweza kupiga, kutuma SMS, au WhatsApp (bonyeza aikoni chini ya ukurasa). "
+        f"Namba ya Cue Flow: {PHONE}. Unaweza kupiga, kutuma SMS, au WhatsApp (bonyeza aikoni chini ya ukurasa). "
         f"Barua pepe: {EMAILS}.",
     ),
     (
         ("wasiliana", "contact", "reach you", "get in touch"),
-        f"Wasiliana na CUE: simu/WhatsApp/SMS {PHONE}; barua pepe {EMAILS}; "
+        f"Wasiliana na Cue Flow: simu/WhatsApp/SMS {PHONE}; barua pepe {EMAILS}; "
         f"anwani {ADDRESS}. Aikoni za haraka ziko chini ya ukurasa, au fungua Contact.",
     ),
     (
         ("barua", "email", "pepe", "gmail", "mail"),
-        f"Barua pepe za CUE: {EMAILS}. Kwa mazungumzo ya haraka tumia simu/WhatsApp {PHONE}.",
+        f"Barua pepe za Cue Flow: {EMAILS}. Kwa mazungumzo ya haraka tumia simu/WhatsApp {PHONE}.",
     ),
     (
         ("mahali", "location", "address", "anwani", "karatina", "nyeri", "ofisi", "ipo wapi", "where are you", "where is"),
-        f"Ofisi/anwani ya CUE: {ADDRESS}.",
+        f"Ofisi/anwani ya Cue Flow: {ADDRESS}.",
     ),
     (
         (
@@ -126,7 +126,7 @@ _FAQ: list[tuple[tuple[str, ...], str]] = [
             "wakati",
             "opening time",
         ),
-        f"Masaa ya CUE: {HOURS}",
+        f"Masaa ya Cue Flow: {HOURS}",
     ),
     (
         (
@@ -139,7 +139,7 @@ _FAQ: list[tuple[tuple[str, ...], str]] = [
             "kuhusu",
             "about",
         ),
-        "CUE ni mfumo wa ufuatiliaji wa mtiririko wa maji kwa IoT — kwa nyumba, mashamba, shule, na taasisi. "
+        "Cue Flow ni mfumo wa ufuatiliaji wa mtiririko wa maji kwa IoT — kwa nyumba, mashamba, shule, na taasisi. "
         "Tunasaidia kugundua uvujaji mapema, kufunga valvu kiotomatiki, na kusimamia maji kwa data hai.",
     ),
     (
@@ -166,17 +166,17 @@ _FAQ: list[tuple[tuple[str, ...], str]] = [
     (
         ("tatizo", "problem", "changamoto", "waste", "upotevu"),
         "Tatizo: uvujaji uliofichika na kuchelewa kugundua hupoteza maji na pesa. "
-        "CUE inalinganisha S1 na S2, hutuma tahadhari, na inaweza kufunga valvu mapema.",
+        "Cue Flow inalinganisha S1 na S2, hutuma tahadhari, na inaweza kufunga valvu mapema.",
     ),
     (
         ("uvujaji", "leak", "leaks", "kuvuja"),
-        "CUE hugundua uvujaji kwa kulinganisha S1 (kiingilio) na S2 (kutoka). Tofauti ikikubwa, mfumo huthibitisha, "
+        "Cue Flow hugundua uvujaji kwa kulinganisha S1 (kiingilio) na S2 (kutoka). Tofauti ikikubwa, mfumo huthibitisha, "
         "hufunga valvu, na hutuma SMS. Angalia Leak Detection baada ya Login.",
     ),
     (
         ("valvu", "valve", "funga", "fungua", "relay", "shut off"),
         "Baada ya Login fungua Valve Control: OPEN kufungua au CLOSE kufunga. "
-        "Uvujaji ukithibitishwa, CUE inaweza kufunga valvu kiotomatiki.",
+        "Uvujaji ukithibitishwa, Cue Flow inaweza kufunga valvu kiotomatiki.",
     ),
     (
         ("mtiririko", "flow", "lita", "sensor", "sensori", "yf-s201", "water usage"),
@@ -204,7 +204,7 @@ _FAQ: list[tuple[tuple[str, ...], str]] = [
     ),
     (
         ("bei", "gharama", "price", "cost", "budget", "kes", "how much"),
-        "Muundo wa CUE umejengwa kwa vifaa vinavyopatikana; makadirio ya bajeti ya kitengo cha umma ni takriban KES 8,180 "
+        "Muundo wa Cue Flow umejengwa kwa vifaa vinavyopatikana; makadirio ya bajeti ya kitengo cha umma ni takriban KES 8,180 "
         f"kwa bomba moja. Kwa bei ya usakinishaji wasiliana: {PHONE}.",
     ),
     (
@@ -321,7 +321,7 @@ def _openai_swahili(message: str) -> str | None:
                     {
                         "role": "system",
                         "content": (
-                            "Wewe ni CUE Assistance, msaidizi wa CUE (ufuatiliaji wa maji, uvujaji, valvu, dashibodi IoT). "
+                            "Wewe ni Cue Flow Assistance, msaidizi wa Cue Flow (ufuatiliaji wa maji, uvujaji, valvu, dashibodi IoT). "
                             "Jibu kwa Kiswahili au Kiingereza kulingana na swali, kifupi na wazi.\n"
                             f"Ukweli: simu {PHONE}; barua pepe {EMAILS}; anwani {ADDRESS}; masaa {HOURS}; "
                             "bajeti ~KES 8,180; sensori YF-S201 S1/S2.\n"
@@ -363,9 +363,9 @@ def chat(message: str, *, history: list[dict[str, Any]] | None = None) -> dict[s
 
     return {
         "reply": (
-            "Ninaweza kukusaidia kwa maswali rahisi kuhusu CUE: namba ya simu, barua pepe, mahali, masaa, "
+            "Ninaweza kukusaidia kwa maswali rahisi kuhusu Cue Flow: namba ya simu, barua pepe, mahali, masaa, "
             "uvujaji, valvu, dashibodi, au Login. Jaribu: \"who are you\", \"what do you do\", \"phone number\", "
-            f"au \"what is CUE\". Simu: {PHONE}."
+            f"au \"what is Cue Flow\". Simu: {PHONE}."
         ),
         "source": "cue-fallback",
         "lang": "sw",

@@ -1,4 +1,4 @@
-"""CUE Assistance speech helpers (server-side only)."""
+"""Cue Flow Assistance speech helpers (server-side only)."""
 
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 /* ============================================================
-   CUE — main.js (corrected for CUE Django backend)
+   Cue Flow — main.js (corrected for Cue Flow Django backend)
    ------------------------------------------------------------
    - JWT auth via window.Auth (js/auth.js)
    - Auto-redirect to login when no token

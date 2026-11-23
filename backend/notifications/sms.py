@@ -1,4 +1,4 @@
-"""TextSMS Kenya send protocol for CUE leak alerts."""
+"""TextSMS Kenya send protocol for Cue Flow leak alerts."""
 
 from __future__ import annotations
 

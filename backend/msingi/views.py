@@ -23,7 +23,7 @@ class MsingiChatView(APIView):
             history = []
         result = chat(message, history=history[:12])
         result["tts"] = msingi_configured()
-        return success_response(result, message="CUE Assistance amejibu")
+        return success_response(result, message="Cue Flow Assistance amejibu")
 
 
 class MsingiSpeakView(APIView):
@@ -51,7 +51,7 @@ class MsingiHealthView(APIView):
     def get(self, request):
         return success_response(
             {
-                "name": "CUE Assistance",
+                "name": "Cue Flow Assistance",
                 "lang": "sw",
                 "voice": True,
                 "text": True,

@@ -11,7 +11,7 @@ Research basis (turbine / hall-effect volumetric meters):
   and chemically incompatible sensors are OUT OF GUARANTEE — flagged below.
 
 Software guarantee: with a compatible single-phase sensor pair, correct K-factor,
-and both ends reporting, the CUE algorithm behaves the same for every fluid class.
+and both ends reporting, the Cue Flow algorithm behaves the same for every fluid class.
 """
 
 from __future__ import annotations
@@ -157,7 +157,7 @@ OUT_OF_GUARANTEE = [
     {
         "id": "multiphase",
         "title": "Multiphase / free gas",
-        "detail": "Oil+gas or aerated lines need multiphase metering; CUE assumes single-phase liquid.",
+        "detail": "Oil+gas or aerated lines need multiphase metering; Cue Flow assumes single-phase liquid.",
     },
     {
         "id": "wrong_sensor_material",

@@ -190,7 +190,7 @@ else:
     CSRF_TRUSTED_ORIGINS = []
 
 SPECTACULAR_SETTINGS = {
-    "TITLE": "CUE Liquid Transport API",
+    "TITLE": "Cue Flow Liquid Transport API",
     "DESCRIPTION": "IoT liquid transport monitoring (water, oil, and other pipe fluids), leak detection and valve control. Same differential flow algorithm across fluids.",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,

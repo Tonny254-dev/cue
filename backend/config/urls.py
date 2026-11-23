@@ -30,7 +30,7 @@ api_patterns = [
 
 def api_index(_request):
     return JsonResponse({
-        "service": "CUE Liquid Transport API",
+        "service": "Cue Flow Liquid Transport API",
         "version": "1.0.0",
         "status": "running",
         "endpoints": {

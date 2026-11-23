@@ -33,7 +33,7 @@ def user_can_access_dashboard(user) -> bool:
 
 class LoginView(TokenObtainPairView):
     """
-    Secure operator login → JWT for the CUE dashboard.
+    Secure operator login → JWT for the Cue Flow dashboard.
     Rejects inactive accounts and users without operator/admin access.
     """
 

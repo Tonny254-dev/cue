@@ -1,4 +1,4 @@
-/* Public announcements from CUE admin → website visitors */
+/* Public announcements from Cue Flow admin → website visitors */
 (function () {
   'use strict';
   if (window.__CUE_PUBLIC_NOTICES__) return;
@@ -79,7 +79,7 @@
             '<p class="cue-notice-title">' + esc(n.title) + pin + '</p>' +
             '<p class="cue-notice-msg">' + esc(n.message) + '</p>' +
             '<div class="cue-notice-meta">' +
-              '<span>CUE announcement · ' + esc(timeAgo(n.created_at)) + '</span>' +
+              '<span>Cue Flow announcement · ' + esc(timeAgo(n.created_at)) + '</span>' +
               '<a class="cue-notice-all" href="notices.html">All notices</a>' +
             '</div>' +
           '</div>' +

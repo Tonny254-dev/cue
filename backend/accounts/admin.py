@@ -11,8 +11,8 @@ class UserAdmin(BaseUserAdmin):
     ordering = ("-date_joined",)
 
     fieldsets = BaseUserAdmin.fieldsets + (
-        ("CUE", {"fields": ("role",)}),
+        ("Cue Flow", {"fields": ("role",)}),
     )
     add_fieldsets = BaseUserAdmin.add_fieldsets + (
-        ("CUE", {"fields": ("email", "role")}),
+        ("Cue Flow", {"fields": ("email", "role")}),
     )

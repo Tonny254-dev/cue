@@ -161,7 +161,7 @@ class Command(BaseCommand):
 
         report = {
             "guarantee": (
-                "CUE differential leak detection works for ANY single-phase pipe liquid "
+                "Cue Flow differential leak detection works for ANY single-phase pipe liquid "
                 "when both sensors are compatible, share a calibrated K-factor, and inlet "
                 "flow is above the fluid arm threshold. Multiphase / wrong materials = out of guarantee."
             ),

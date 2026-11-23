@@ -28,7 +28,7 @@ def format_leak_sms(
     rng = loc.get("distance_from_s1_range_m")
 
     lines = [
-        f"CUE LEAK {zone}",
+        f"Cue Flow LEAK {zone}",
         "--- LEAK LOCATION ---",
     ]
 

@@ -160,7 +160,7 @@ def ensure_kit_baseline() -> FinanceEntry | None:
         entry_type=FinanceEntry.EntryType.EXPENSE,
         category=FinanceEntry.Category.HARDWARE,
         amount=settings.kit_unit_cost,
-        title="CUE monitoring kit (baseline)",
+        title="Cue Flow monitoring kit (baseline)",
         notes="Auto baseline hardware cost for single-pipeline kit",
         source=FinanceEntry.Source.AUTO,
         unique_key="hardware:kit:baseline",

@@ -1,5 +1,5 @@
 /* ============================================================
-   CUE — auth.js
+   Cue Flow — auth.js
    Secure login → JWT → /auth/me/ gate → operator dashboard
    ============================================================ */
 (function () {

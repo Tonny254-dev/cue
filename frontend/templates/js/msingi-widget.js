@@ -1,4 +1,4 @@
-/* CUE Assistance floating chat (text + voice) + bottom contact FABs */
+/* Cue Flow Assistance floating chat (text + voice) + bottom contact FABs */
 (function () {
   'use strict';
 
@@ -12,7 +12,7 @@
     if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:8000/api/v1';
     return location.origin.replace(/\/$/, '') + '/api/v1';
   })();
-  var BRAND = 'CUE Assistance';
+  var BRAND = 'Cue Flow Assistance';
 
   function el(html) {
     var t = document.createElement('template');
@@ -122,10 +122,10 @@
 
     var stack = el(
       '<div class="ms-fab-stack" id="msingiRoot">' +
-        '<div class="ms-chat-panel" id="msingiPanel" role="dialog" aria-label="CUE Assistance">' +
+        '<div class="ms-chat-panel" id="msingiPanel" role="dialog" aria-label="Cue Flow Assistance">' +
           '<div class="ms-chat-head">' +
             '<div class="ms-chat-avatar">C</div>' +
-            '<div><h3>CUE Assistance</h3><p>Msaidizi · Kiswahili & English · maandishi & sauti</p></div>' +
+            '<div><h3>Cue Flow Assistance</h3><p>Msaidizi · Kiswahili & English · maandishi & sauti</p></div>' +
             '<button type="button" class="ms-chat-close" id="msingiClose" aria-label="Funga">✕</button>' +
           '</div>' +
           '<div class="ms-chat-body" id="msingiBody"></div>' +
@@ -135,7 +135,7 @@
             '<button type="button" class="ms-icon-btn send" id="msingiSend" title="Send"><i class="bi bi-send-fill"></i></button>' +
           '</div>' +
         '</div>' +
-        '<button type="button" class="ms-chat-launcher" id="msingiLaunch" aria-expanded="false" title="CUE Assistance">' +
+        '<button type="button" class="ms-chat-launcher" id="msingiLaunch" aria-expanded="false" title="Cue Flow Assistance">' +
           '<i class="bi bi-chat-dots-fill"></i>' +
         '</button>' +
       '</div>'
@@ -143,9 +143,9 @@
 
     // Open Gmail compose in the browser (mailto only opens a local mail app)
     function gmailCompose(to) {
-      var su = encodeURIComponent('CUE inquiry');
+      var su = encodeURIComponent('Cue Flow inquiry');
       var body = encodeURIComponent(
-        'Habari CUE team,\n\nMy name is: \nPhone: \n\nI would like help with: \n\nAsante.'
+        'Habari Cue Flow team,\n\nMy name is: \nPhone: \n\nI would like help with: \n\nAsante.'
       );
       return 'https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(to) +
         '&su=' + su + '&body=' + body;
@@ -238,7 +238,7 @@
     addMsg(
       ui.body,
       'bot',
-      'Habari! Mimi ni CUE Assistance. Niulize kwa maandishi au bonyeza maikrofoni — ninaweza kujibu maswali rahisi kuhusu CUE, namba, barua pepe, na dashibodi.',
+      'Habari! Mimi ni Cue Flow Assistance. Niulize kwa maandishi au bonyeza maikrofoni — ninaweza kujibu maswali rahisi kuhusu Cue Flow, namba, barua pepe, na dashibodi.',
       'karibu'
     );
 
@@ -273,7 +273,7 @@
         })
         .catch(function () {
           pending.textContent =
-            'Samahani, sijaweza kuunganisha sasa. Hakikisha seva ya CUE inaendesha — au piga ' + PHONE_DISPLAY + '.';
+            'Samahani, sijaweza kuunganisha sasa. Hakikisha seva ya Cue Flow inaendesha — au piga ' + PHONE_DISPLAY + '.';
           speakSwahili(pending.textContent);
         });
     }
