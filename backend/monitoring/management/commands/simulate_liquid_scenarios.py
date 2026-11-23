@@ -287,5 +287,13 @@ class Command(BaseCommand):
             for g in OUT_OF_GUARANTEE:
                 self.stdout.write(f"  - {g['id']}: {g['title']}")
 
+        # Keep lab fixtures out of the live dashboard (LIVE prefers non-SIM pipelines).
+        Pipeline.objects.filter(pipeline_code__startswith="SIM-").update(
+            status=Pipeline.Status.INACTIVE
+        )
+        Sensor.objects.filter(sensor_identifier__startswith="SIM-").update(
+            status=Sensor.Status.INACTIVE
+        )
+
         if failed:
             raise SystemExit(1)

@@ -77,13 +77,28 @@ class FluidProfilesView(APIView):
 
 
 # ---------- Live Monitoring ----------
+def _primary_pipeline(pipeline_id=None):
+    """Prefer the real kit line; ignore SIM-* lab pipelines unless explicitly requested."""
+    if pipeline_id:
+        return Pipeline.objects.filter(pk=pipeline_id).first()
+    real = (
+        Pipeline.objects.exclude(pipeline_code__startswith="SIM-")
+        .exclude(status=Pipeline.Status.INACTIVE)
+        .order_by("id")
+        .first()
+    )
+    if real:
+        return real
+    return Pipeline.objects.exclude(status=Pipeline.Status.INACTIVE).order_by("id").first()
+
+
 class LiveMonitoringView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
-        pipeline_id = request.query_params.get("pipeline")
-        pipeline = Pipeline.objects.filter(pk=pipeline_id).first() if pipeline_id else Pipeline.objects.first()
+        pipeline = _primary_pipeline(request.query_params.get("pipeline"))
         data = {
             "pipeline_id": pipeline.id if pipeline else None,
+            "pipeline_code": getattr(pipeline, "pipeline_code", None) if pipeline else None,
             "fluid_type": getattr(pipeline, "fluid_type", None) if pipeline else None,
             "current_flow_rate": current_flow_rate(pipeline),
             "unit": "L/min",
@@ -91,7 +106,9 @@ class LiveMonitoringView(APIView):
             "sensors": [],
         }
         if pipeline:
-            for s in Sensor.objects.filter(pipeline=pipeline):
+            for s in Sensor.objects.filter(pipeline=pipeline).exclude(
+                sensor_identifier__startswith="SIM-"
+            ):
                 last = latest_reading_for_sensor(s)
                 data["sensors"].append({
                     "sensor": s.sensor_identifier,
@@ -103,8 +120,7 @@ class LiveMonitoringView(APIView):
 class FlowRateView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
-        pipeline_id = request.query_params.get("pipeline")
-        pipeline = Pipeline.objects.filter(pk=pipeline_id).first() if pipeline_id else None
+        pipeline = _primary_pipeline(request.query_params.get("pipeline"))
         return success_response({
             "flow_rate": current_flow_rate(pipeline),
             "unit": "L/min",
@@ -114,8 +130,7 @@ class FlowRateView(APIView):
 class ConsumptionTodayView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
-        pipeline_id = request.query_params.get("pipeline")
-        pipeline = Pipeline.objects.filter(pk=pipeline_id).first() if pipeline_id else None
+        pipeline = _primary_pipeline(request.query_params.get("pipeline"))
         return success_response({
             "consumption_volume": consumption_today(pipeline),
             "unit": "L",
@@ -125,7 +140,10 @@ class SensorStatusListView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
         data = []
-        for s in Sensor.objects.select_related("device"):
+        qs = Sensor.objects.select_related("device").exclude(
+            sensor_identifier__startswith="SIM-"
+        ).exclude(device__device_identifier__startswith="SIM-")
+        for s in qs:
             last = latest_reading_for_sensor(s)
             data.append({
                 "sensor_id": s.id,

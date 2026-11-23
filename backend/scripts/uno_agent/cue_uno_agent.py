@@ -49,12 +49,12 @@ DV_RE = re.compile(
     re.I,
 )
 PULSE_RE = re.compile(r"pulses:(?P<p1>\d+)/(?P<p2>\d+)", re.I)
-# After API 429, pause posts so we don't dig a deeper throttle hole.
-_post_backoff_until = 0.0
-# Keep HTTP off the serial thread. One worker + small queue (drop old) so
-# Django/SQLite is not flooded and the UI always sees the freshest sample.
-_HTTP_TIMEOUT = 4.0
-_http_q: queue.Queue = queue.Queue(maxsize=6)
+# Per-target cooldown (dead cloud must not freeze local live).
+_target_backoff_until: dict[str, float] = {}
+# Keep HTTP off the serial thread. Prefer local posts; drop oldest when full.
+_HTTP_TIMEOUT = 3.0
+_HTTP_TIMEOUT_REMOTE = 2.5
+_http_q: queue.Queue = queue.Queue(maxsize=12)
 
 
 def _http_worker() -> None:
@@ -322,12 +322,41 @@ def find_uno_port(cfg: dict) -> str | None:
     return None
 
 
+def _target_key(target: dict) -> str:
+    return str(target.get("api_base") or target.get("name") or "")
+
+
+def _target_cooling(target: dict) -> bool:
+    return time.time() < _target_backoff_until.get(_target_key(target), 0.0)
+
+
+def _cool_target(target: dict, seconds: float, reason: str) -> None:
+    until = time.time() + seconds
+    _target_backoff_until[_target_key(target)] = until
+    log.warning(
+        "[%s] cooling %.0fs (%s) — other targets keep running",
+        target.get("name"),
+        seconds,
+        reason,
+    )
+
+
+def _is_local_target(target: dict) -> bool:
+    base = str(target.get("api_base") or "")
+    return "127.0.0.1" in base or "localhost" in base
+
+
+def _timeout_for(target: dict) -> float:
+    return _HTTP_TIMEOUT if _is_local_target(target) else _HTTP_TIMEOUT_REMOTE
+
+
 def _post_one(
-    target: dict, path: str, payload: dict, timeout: float = _HTTP_TIMEOUT
+    target: dict, path: str, payload: dict, timeout: float | None = None
 ) -> requests.Response | None:
-    global _post_backoff_until
-    if time.time() < _post_backoff_until:
+    if _target_cooling(target):
         return None
+    if timeout is None:
+        timeout = _timeout_for(target)
     url = target["api_base"] + path
     try:
         r = requests.post(url, headers=headers(target), json=payload, timeout=timeout)
@@ -340,13 +369,7 @@ def _post_one(
                     wait = min(float(m.group(1)), 60.0)
             except Exception:
                 pass
-            _post_backoff_until = time.time() + wait
-            log.warning(
-                "[%s] POST %s -> 429 — backing off %.0fs",
-                target["name"],
-                path,
-                wait,
-            )
+            _cool_target(target, wait, "429")
         elif r.status_code >= 400:
             log.warning(
                 "[%s] POST %s -> %s %s",
@@ -363,33 +386,50 @@ def _post_one(
             log.info("[%s] OK %s -> %s", target["name"], path, r.status_code)
         return r
     except Exception as exc:
-        log.warning("[%s] POST %s failed: %s", target["name"], path, exc)
+        # Don't let a slow cloud host freeze the kit / local UI.
+        _cool_target(target, 45.0 if not _is_local_target(target) else 5.0, str(exc)[:80])
         return None
 
 
 def _post_one_async(
-    target: dict, path: str, payload: dict, timeout: float = _HTTP_TIMEOUT
+    target: dict, path: str, payload: dict, timeout: float | None = None
 ) -> None:
+    if _target_cooling(target):
+        return
+    if timeout is None:
+        timeout = _timeout_for(target)
     item = (target, path, payload, timeout)
+    # Prefer not dropping local posts when the queue is full of remote work.
     try:
         _http_q.put_nowait(item)
         return
     except queue.Full:
         pass
     try:
-        _http_q.get_nowait()
+        old = _http_q.get_nowait()
         _http_q.task_done()
+        # If we dropped a local item to make room for remote, put local back.
+        if _is_local_target(old[0]) and not _is_local_target(target):
+            try:
+                _http_q.put_nowait(old)
+                return
+            except queue.Full:
+                pass
     except queue.Empty:
         pass
     try:
         _http_q.put_nowait(item)
     except queue.Full:
-        log.warning("HTTP queue full — dropping %s", path)
+        log.warning("HTTP queue full — dropping %s %s", target.get("name"), path)
 
 
 def _get_one(
-    target: dict, path: str, timeout: float = _HTTP_TIMEOUT
+    target: dict, path: str, timeout: float | None = None
 ) -> requests.Response | None:
+    if _target_cooling(target):
+        return None
+    if timeout is None:
+        timeout = _timeout_for(target)
     url = target["api_base"] + path
     try:
         r = requests.get(url, headers=headers(target), timeout=timeout)
@@ -403,7 +443,7 @@ def _get_one(
             )
         return r
     except Exception as exc:
-        log.warning("[%s] GET %s failed: %s", target["name"], path, exc)
+        _cool_target(target, 45.0 if not _is_local_target(target) else 5.0, str(exc)[:80])
         return None
 
 
@@ -525,7 +565,7 @@ def report_offline(cfg: dict, note: str = "COM port disconnected") -> None:
 
 def heartbeat_ok(cfg: dict) -> None:
     for target in cfg["targets"]:
-        _post_one(
+        _post_one_async(
             target,
             "/iot/heartbeat/",
             {
@@ -537,10 +577,15 @@ def heartbeat_ok(cfg: dict) -> None:
 
 
 def poll_valve_commands(cfg: dict, ser: serial.Serial) -> None:
-    """Pull pending commands from every target; first success wins per command id."""
+    """Pull pending commands; poll local first and skip cooling remotes on the serial thread."""
     seen: set[Any] = set()
-    for target in cfg["targets"]:
-        r = _get_one(target, "/iot/commands/pending/")
+    ordered = sorted(cfg["targets"], key=lambda t: 0 if _is_local_target(t) else 1)
+    for target in ordered:
+        # Never block USB/serial on a slow cloud round-trip.
+        if not _is_local_target(target) and _target_cooling(target):
+            continue
+        timeout = 1.5 if _is_local_target(target) else 2.0
+        r = _get_one(target, "/iot/commands/pending/", timeout=timeout)
         if r is None or r.status_code >= 400:
             continue
         try:
