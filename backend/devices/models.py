@@ -31,8 +31,18 @@ class Device(TimeStampedModel):
     def __str__(self):
         return f"{self.device_name} ({self.device_identifier})"
 
-    def mark_connected(self):
+    def mark_connected(self, *, force: bool = False):
+        """Mark online. Throttled to cut DB writes on high-rate IoT ingest."""
+        import time
+
         from django.utils import timezone
+
+        now_mono = time.monotonic()
+        last = getattr(self, "_last_mark_connected_mono", 0.0)
+        already_connected = self.connection_status == self.ConnectionStatus.CONNECTED
+        if not force and already_connected and (now_mono - last) < 30.0:
+            return
+        self._last_mark_connected_mono = now_mono
         self.connection_status = self.ConnectionStatus.CONNECTED
         self.last_communication = timezone.now()
         self.save(update_fields=["connection_status", "last_communication", "updated_at"])

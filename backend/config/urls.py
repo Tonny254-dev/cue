@@ -72,8 +72,15 @@ def frontend_file(_request, path: str):
     return serve(_request, path=str(target.relative_to(FRONTEND_ROOT)), document_root=str(FRONTEND_ROOT))
 
 
+def healthz(_request):
+    """Ultra-cheap keep-alive / health probe for Render free-tier wake."""
+    return JsonResponse({"ok": True, "service": "cue"})
+
+
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("healthz", healthz, name="healthz"),
+    path("healthz/", healthz, name="healthz-slash"),
     path("api/v1/", include(api_patterns)),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),

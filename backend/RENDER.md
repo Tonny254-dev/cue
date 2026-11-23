@@ -18,6 +18,9 @@ Use the `cue` repo (or push `backend/` + `render.yaml`).
 
 **Live service today:** https://cue-backend-rd5t.onrender.com  
 
+### Why production feels slow
+Render **free** web + Postgres sleeps after idle and every request pays PBKDF2 + DB round-trips. CUE now caches device auth and live snapshots, and GitHub Actions pings `/healthz` every 5 minutes to reduce cold starts. For consistently fast production, upgrade the Render web service (and DB) off the free plan.
+
 GitHub `main` does **not** always auto-deploy. After every push:
 
 1. Open [Render Dashboard](https://dashboard.render.com) → service **cue-backend-rd5t**

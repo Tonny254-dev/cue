@@ -95,7 +95,15 @@ def _primary_pipeline(pipeline_id=None):
 class LiveMonitoringView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
+        from monitoring.live_cache import get_live_snapshot
+
         pipeline = _primary_pipeline(request.query_params.get("pipeline"))
+        # Fast path: snapshot written on each IoT ingest (avoids slow free-Postgres polls).
+        if request.query_params.get("fresh") != "1":
+            cached = get_live_snapshot(pipeline.id if pipeline else None)
+            if cached:
+                return success_response(cached)
+
         data = {
             "pipeline_id": pipeline.id if pipeline else None,
             "pipeline_code": getattr(pipeline, "pipeline_code", None) if pipeline else None,
@@ -104,6 +112,7 @@ class LiveMonitoringView(APIView):
             "unit": "L/min",
             "consumption_today": consumption_today(pipeline),
             "sensors": [],
+            "cached": False,
         }
         if pipeline:
             for s in Sensor.objects.filter(pipeline=pipeline).exclude(

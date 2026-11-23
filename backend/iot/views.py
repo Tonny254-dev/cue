@@ -17,6 +17,63 @@ from .serializers import (ReadingIngestSerializer, BulkReadingsSerializer,
                           ValveStatusReportSerializer)
 
 
+def _refresh_live_cache(device: Device) -> None:
+    """Push a cheap live snapshot so the dashboard does not wait on heavy queries."""
+    try:
+        from monitoring.live_cache import set_live_snapshot
+        from monitoring.models import Sensor
+        from monitoring.services import latest_reading_for_sensor
+
+        sensors = list(
+            Sensor.objects.filter(device=device)
+            .exclude(sensor_identifier__startswith="SIM-")
+            .select_related("pipeline")
+        )
+        if not sensors:
+            return
+        pipeline = next((s.pipeline for s in sensors if s.pipeline_id), None)
+        rows = []
+        rates = []
+        for s in sensors:
+            last = latest_reading_for_sensor(s)
+            if last is not None:
+                rates.append(float(last.flow_rate))
+            rows.append(
+                {
+                    "sensor": s.sensor_identifier,
+                    "position": s.sensor_position,
+                    "last_reading": {
+                        "flow_rate": str(last.flow_rate) if last else None,
+                        "volume": str(last.volume) if last else None,
+                        "pulse_count": last.pulse_count if last else 0,
+                        "reading_timestamp": last.reading_timestamp.isoformat()
+                        if last
+                        else None,
+                        "received_at": last.received_at.isoformat()
+                        if last and getattr(last, "received_at", None)
+                        else None,
+                    }
+                    if last
+                    else None,
+                }
+            )
+        set_live_snapshot(
+            pipeline.id if pipeline else None,
+            {
+                "pipeline_id": pipeline.id if pipeline else None,
+                "pipeline_code": getattr(pipeline, "pipeline_code", None),
+                "fluid_type": getattr(pipeline, "fluid_type", None),
+                "current_flow_rate": max(rates) if rates else 0.0,
+                "unit": "L/min",
+                "consumption_today": 0.0,
+                "sensors": rows,
+                "cached": True,
+            },
+        )
+    except Exception:
+        pass
+
+
 class IoTAPIView(APIView):
     """Device ingest uses empty auth classes (manual DeviceAuthentication) —
     do not apply AnonRateThrottle (100/hour) or the kit gets 429 within a minute."""
@@ -107,8 +164,8 @@ class ReadingIngestView(IoTAPIView):
         except ValueError as ve:
             return error_response(str(ve), {"sensor_id": [str(ve)]})
         device.mark_connected()
-        DeviceCommunicationLog.objects.create(device=device, kind="READING",
-                                              payload={"sensor": payload["sensor_id"]})
+        # Skip per-reading communication logs — they dominate DB time on free Postgres.
+        _refresh_live_cache(device)
         return created_response({"id": reading.id if reading else None}, "Reading recorded")
 
 class BulkReadingsView(IoTAPIView):
@@ -149,6 +206,7 @@ class BulkReadingsView(IoTAPIView):
                 broadcast_flow_reading(saved[0])
             except Exception:
                 pass
+        _refresh_live_cache(device)
         return created_response({"accepted": accepted, "errors": errors}, "Bulk ingested")
 
 class SensorReadingView(IoTAPIView):
@@ -210,8 +268,6 @@ class HeartbeatView(IoTAPIView):
         if serializer.validated_data.get("firmware_version"):
             device.firmware_version = serializer.validated_data["firmware_version"]
             device.save(update_fields=["firmware_version"])
-        DeviceCommunicationLog.objects.create(device=device, kind="HEARTBEAT",
-                                              payload=serializer.validated_data)
         return success_response({"server_time": __import__("django.utils.timezone", fromlist=["now"]).now()},
                                 "Heartbeat accepted")
 
