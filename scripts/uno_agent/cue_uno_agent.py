@@ -52,8 +52,9 @@ PULSE_RE = re.compile(r"pulses:(?P<p1>\d+)/(?P<p2>\d+)", re.I)
 # Per-target cooldown (dead cloud must not freeze local live).
 _target_backoff_until: dict[str, float] = {}
 # Keep HTTP off the serial thread. Prefer local posts; drop oldest when full.
-_HTTP_TIMEOUT = 3.0
-_HTTP_TIMEOUT_REMOTE = 2.5
+_HTTP_TIMEOUT = 4.0
+# Render free tier often needs a long first request to wake the service.
+_HTTP_TIMEOUT_REMOTE = 20.0
 _http_q: queue.Queue = queue.Queue(maxsize=12)
 
 
@@ -387,7 +388,8 @@ def _post_one(
         return r
     except Exception as exc:
         # Don't let a slow cloud host freeze the kit / local UI.
-        _cool_target(target, 45.0 if not _is_local_target(target) else 5.0, str(exc)[:80])
+        cool = 20.0 if not _is_local_target(target) else 2.0
+        _cool_target(target, cool, str(exc)[:80])
         return None
 
 
@@ -443,7 +445,9 @@ def _get_one(
             )
         return r
     except Exception as exc:
-        _cool_target(target, 45.0 if not _is_local_target(target) else 5.0, str(exc)[:80])
+        # Command polls failing must not take the target offline for long.
+        cool = 15.0 if not _is_local_target(target) else 1.0
+        _cool_target(target, cool, str(exc)[:80])
         return None
 
 
@@ -584,8 +588,10 @@ def poll_valve_commands(cfg: dict, ser: serial.Serial) -> None:
         # Never block USB/serial on a slow cloud round-trip.
         if not _is_local_target(target) and _target_cooling(target):
             continue
-        timeout = 1.5 if _is_local_target(target) else 2.0
-        r = _get_one(target, "/iot/commands/pending/", timeout=timeout)
+        # Poll local only on the serial thread; remotes are best-effort/async-ish.
+        if not _is_local_target(target):
+            continue
+        r = _get_one(target, "/iot/commands/pending/", timeout=3.0)
         if r is None or r.status_code >= 400:
             continue
         try:

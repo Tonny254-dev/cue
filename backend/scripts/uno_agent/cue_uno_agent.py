@@ -52,8 +52,9 @@ PULSE_RE = re.compile(r"pulses:(?P<p1>\d+)/(?P<p2>\d+)", re.I)
 # Per-target cooldown (dead cloud must not freeze local live).
 _target_backoff_until: dict[str, float] = {}
 # Keep HTTP off the serial thread. Prefer local posts; drop oldest when full.
-_HTTP_TIMEOUT = 3.0
-_HTTP_TIMEOUT_REMOTE = 2.5
+_HTTP_TIMEOUT = 4.0
+# Render free tier often needs a long first request to wake the service.
+_HTTP_TIMEOUT_REMOTE = 20.0
 _http_q: queue.Queue = queue.Queue(maxsize=12)
 
 
@@ -387,7 +388,8 @@ def _post_one(
         return r
     except Exception as exc:
         # Don't let a slow cloud host freeze the kit / local UI.
-        _cool_target(target, 45.0 if not _is_local_target(target) else 5.0, str(exc)[:80])
+        cool = 20.0 if not _is_local_target(target) else 2.0
+        _cool_target(target, cool, str(exc)[:80])
         return None
 
 

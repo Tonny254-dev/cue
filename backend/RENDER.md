@@ -16,10 +16,22 @@ Use the `cue` repo (or push `backend/` + `render.yaml`).
 
 ## 2. Deploy on Render
 
+**Live service today:** https://cue-backend-rd5t.onrender.com  
+
+GitHub `main` does **not** always auto-deploy. After every push:
+
+1. Open [Render Dashboard](https://dashboard.render.com) → service **cue-backend-rd5t**
+2. **Manual Deploy** → **Deploy latest commit**
+3. Wait until status is **Live**, then hard-refresh the site
+
+First-time / blueprint setup:
+
 1. [Render Dashboard](https://dashboard.render.com) → **New** → **Blueprint**
 2. Connect the GitHub repo that contains `render.yaml`
 3. Apply the blueprint (creates **cue-api** web service + **cue-db** Postgres)
 4. After first deploy, open the service URL (e.g. `https://cue-api-xxxx.onrender.com`)
+
+Use the **onrender.com** URL for testing. Custom domains need a valid TLS certificate (e.g. `cue.zirocreativeagency.co.ke` currently fails SSL).
 
 ### Create admin user (Render Shell)
 
